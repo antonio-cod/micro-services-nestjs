@@ -1,0 +1,7 @@
+## Install
+
+npm i @nestjs/config @nestjs/throttler @nestjs/swagger @nestjs/axios helmet
+npm install -D @types/helmet
+npm i class-validator
+npm i -D @types/class-validator
+npm i class-transformer
