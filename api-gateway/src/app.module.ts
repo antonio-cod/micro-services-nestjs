@@ -7,6 +7,7 @@ import { ProxyModule } from './proxy/proxy.module';
 // import { ProxyService } from './proxy/service/proxy.service';
 import { MiddlewareModule } from './middleware/middleware.module';
 import { LoggingMiddleware } from './middleware/looging/looging.middleware';
+import { AuthModule } from './auth/auth.module';
 
 @Module({
   imports: [
@@ -21,6 +22,7 @@ import { LoggingMiddleware } from './middleware/looging/looging.middleware';
     ]),
     ProxyModule,
     MiddlewareModule,
+    AuthModule,
   ],
   controllers: [AppController],
   providers: [AppService],

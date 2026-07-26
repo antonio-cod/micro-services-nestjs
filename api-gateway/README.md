@@ -5,3 +5,4 @@ npm install -D @types/helmet
 npm i class-validator
 npm i -D @types/class-validator
 npm i class-transformer
+npm install @nestjs/jwt @nestjs/passport passport passport-jwt
