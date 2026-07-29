@@ -2,7 +2,7 @@ import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { ThrottlerModule } from '@nestjs/throttler';
-import { ConfigModule } from '@nestjs/config';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ProxyModule } from './proxy/proxy.module';
 // import { ProxyService } from './proxy/service/proxy.service';
 import { MiddlewareModule } from './middleware/middleware.module';
@@ -14,12 +14,13 @@ import { AuthModule } from './auth/auth.module';
     ConfigModule.forRoot({
       isGlobal: true,
     }),
-    ThrottlerModule.forRoot([
-      {
-        ttl: 60000,
-        limit: 100,
-      },
-    ]),
+    ThrottlerModule.forRootAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        ttl: configService.get<number>('THROTTLER_TTL'),
+        limit: configService.get<number>('THROTTLER_LIMIT'),
+      }),
+    }),
     ProxyModule,
     MiddlewareModule,
     AuthModule,
