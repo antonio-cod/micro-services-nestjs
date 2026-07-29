@@ -16,3 +16,6 @@ nest g co auth/controllers/auth --flat
 nest g gu auth/guard/auth --flat
 nest g gu auth/guard/session --flat
 nest g gu auth/guard/role --flat
+nest g d auth/decorators/public --flat
+nest g d auth/decorators/roles --flat
+nest g d auth/decorators/current-user --flat
