@@ -14,3 +14,4 @@ nest g mo auth
 nest g s auth/service/auth --flat
 nest g co auth/controllers/auth --flat
 nest g gu auth/guard/auth --flat
+nest g gu auth/guard/session --flat
