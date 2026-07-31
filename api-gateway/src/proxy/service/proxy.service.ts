@@ -4,6 +4,14 @@ import { serviceConfig } from '../../config/gateway.config';
 import { firstValueFrom } from 'rxjs';
 import { isAxiosError } from 'axios';
 
+interface UserInfo {
+  userId: string;
+  email: string;
+  role: string;
+}
+
+type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+
 @Injectable()
 export class ProxyService {
   private readonly logger = new Logger(ProxyService.name);
@@ -14,9 +22,9 @@ export class ProxyService {
     serviceName: keyof typeof serviceConfig,
     method: string,
     path: string,
-    data?: any,
-    headers?: any,
-    userInfo?: any,
+    data?: unknown,
+    headers?: Record<string, string>,
+    userInfo?: UserInfo,
   ) {
     const service = serviceConfig[serviceName];
     const url = `${service.url}${path}`;

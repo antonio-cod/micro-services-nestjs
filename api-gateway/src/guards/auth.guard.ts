@@ -9,6 +9,12 @@ import { Observable } from 'rxjs';
 
 const JwtGuard = AuthGuard('jwt');
 
+interface JwtUser {
+  userId: string;
+  email: string;
+  role: string;
+}
+
 @Injectable()
 export class JwtAuthGuard extends JwtGuard {
   constructor(private reflector: Reflector) {
@@ -30,11 +36,17 @@ export class JwtAuthGuard extends JwtGuard {
     return super.canActivate(context);
   }
 
-  handleRequest(err: any, user: any, info: any) {
+  handleRequest<TUSer = JwtUser>(
+    err: Error | null,
+    user: JwtUser | false,
+    _info: unknown,
+    context: ExecutionContext,
+    status?: unknown,
+  ): TUSer {
     if (err || !user) {
       throw err || new UnauthorizedException();
     }
 
-    return user;
+    return user as TUSer;
   }
 }
