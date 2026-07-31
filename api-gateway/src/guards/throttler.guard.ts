@@ -1,8 +1,8 @@
-import { Injectable, type ExecutionContext } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import {
   ThrottlerException,
   ThrottlerGuard,
-  type ThrottlerRequest,
+  ThrottlerRequest,
 } from '@nestjs/throttler';
 
 @Injectable()
@@ -12,10 +12,9 @@ export class CustomThrottlerGuard extends ThrottlerGuard {
   }
 
   protected async handleRequest(
-    context: ExecutionContext,
-    limit: number,
-    ttl: number,
+    requestProps: ThrottlerRequest,
   ): Promise<boolean> {
+    const { context, limit, ttl } = requestProps;
     const { req, res } = this.getRequestResponse(context);
     const throttles = this.reflector.get('throttle', context.getHandler());
     const throttleName = throttles ? Object.keys(throttles)[0] : 'default';

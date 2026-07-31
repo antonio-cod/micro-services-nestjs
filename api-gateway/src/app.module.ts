@@ -8,6 +8,8 @@ import { ProxyModule } from './proxy/proxy.module';
 import { MiddlewareModule } from './middleware/middleware.module';
 import { LoggingMiddleware } from './middleware/looging/looging.middleware';
 import { AuthModule } from './auth/auth.module';
+import { CustomThrottlerGuard } from './guards/throttler.guard';
+import { APP_GUARD } from '@nestjs/core';
 
 @Module({
   imports: [
@@ -16,17 +18,36 @@ import { AuthModule } from './auth/auth.module';
     }),
     ThrottlerModule.forRootAsync({
       imports: [ConfigModule],
-      useFactory: (configService: ConfigService) => ({
-        ttl: configService.get<number>('THROTTLER_TTL'),
-        limit: configService.get<number>('THROTTLER_LIMIT'),
-      }),
+      useFactory: (configService: ConfigService) => [
+        {
+          name: 'short',
+          ttl: 1000,
+          limit: configService.get<number>('RATE_LIMIT_SHORT', 10),
+        },
+        {
+          name: 'short',
+          ttl: 60000,
+          limit: configService.get<number>('RATE_LIMIT_MEDIUM', 100),
+        },
+        {
+          name: 'short',
+          ttl: 900000,
+          limit: configService.get<number>('RATE_LIMIT_LONG', 1000),
+        },
+      ],
     }),
     ProxyModule,
     MiddlewareModule,
     AuthModule,
   ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: CustomThrottlerGuard,
+    },
+  ],
   // exports: [ProxyService],
 })
 export class AppModule implements NestModule {
