@@ -38,7 +38,7 @@ async function bootstrap() {
         callback(new Error('Not allowed by CORS'));
       }
     },
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
     allowedHeaders: [
       'Content-Type',
       'Authorization',
@@ -48,13 +48,15 @@ async function bootstrap() {
       'Access-Control-Request-Method',
       'Access-Control-Request-Headers',
     ],
+    credentials: true,
+    maxAge: 86400, // 24 hours
   });
 
   app.useGlobalPipes(
     new ValidationPipe({
+      transform: true,
       whitelist: true,
       forbidNonWhitelisted: true,
-      transform: true,
     }),
   );
 
@@ -111,7 +113,14 @@ async function bootstrap() {
     .build();
 
   const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api', app, document);
+  SwaggerModule.setup('api', app, document, {
+    swaggerOptions: {},
+    customSiteTitle: 'Marketplace API Gateway Documentation',
+    customCss: `
+      .swagger-ui .topbar { display: none }
+      .swagger-ui .info .title { color: #3b82f6 }
+    `,
+  });
 
   const port = process.env.PORT || 3005;
   await app.listen(port);
@@ -119,4 +128,5 @@ async function bootstrap() {
   console.log(`🚀 API Gateway running on port ${port}`);
   console.log(`📚 Swagger documentation: <http://localhost>:${port}/api`);
 }
+
 bootstrap();
