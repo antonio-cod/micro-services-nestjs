@@ -43,11 +43,11 @@ export class CircuitBreakerService {
 
     try {
       const result = await operation();
-      this.onSucess(circuit, key);
+      this.onSuccess(circuit, key);
 
       return result;
     } catch (error) {
-      this.onFailure(circuit, key);
+      this.onFailure(circuit, key, options);
       this.logger.error(`Circuit breaker failure for ${key}:`, error.message);
 
       if (fallback) {
@@ -65,7 +65,7 @@ export class CircuitBreakerService {
   ): CircuitBreakerState {
     if (!this.circuits.has(key)) {
       this.circuits.set(key, {
-        state: CircuitBreakerStateEnum.CLOSED,
+        state: CircuitBreakerStateEnum.CLOSE,
         failureCount: 0,
         lastFailureTime: 0,
         nextAttemptTime: Date.now() + options.timeout,
@@ -73,5 +73,41 @@ export class CircuitBreakerService {
     }
 
     return this.circuits.get(key)!;
+  }
+
+  private onSuccess(circuit: CircuitBreakerState, key: string): void {
+    circuit.failureCount = 0;
+    circuit.state = CircuitBreakerStateEnum.CLOSE;
+    this.logger.debug(`Circuit breaker SUCCESS for ${key}, state: CLOSED`);
+  }
+
+  private onFailure(
+    circuit: CircuitBreakerState,
+    key: string,
+    options: CircuitBreakerOptions,
+  ): void {
+    circuit.failureCount++;
+    circuit.lastFailureTime = Date.now();
+
+    if (circuit.failureCount >= options.failureThreshold) {
+      circuit.state = CircuitBreakerStateEnum.OPEN;
+      circuit.nextAttemptTime = Date.now() + options.resetTimeout;
+      this.logger.warn(
+        `Circuit breaker OPENED for ${key} after ${circuit.failureCount} failures`,
+      );
+    }
+  }
+
+  getCircuitState(key: string): CircuitBreakerState | undefined {
+    return this.circuits.get(key);
+  }
+
+  getAllCircuits(): Map<string, CircuitBreakerState> {
+    return new Map(this.circuits);
+  }
+
+  resetCircuit(key: string): void {
+    this.circuits.delete(key);
+    this.logger.log(`Circuit breaker RESET for ${key}`);
   }
 }
