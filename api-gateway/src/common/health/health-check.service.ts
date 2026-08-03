@@ -1,10 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
-
+import { HealthStatus, type ServiceHealth } from './health-check.interface';
 import type { HttpService } from '@nestjs/axios';
 import type { CircuitBreakerService } from '../circuit-breaker/circuit-breaker.service';
 
 import { firstValueFrom, timeout } from 'rxjs';
-import { ServiceHealth } from './health-check.interface';
 import { serviceConfig } from '../../config/gateway.config';
 
 @Injectable()
@@ -77,5 +76,41 @@ export class HealthCheckService {
 
       return serviceHealth;
     }
+  }
+
+  async checkAllServices(): Promise<ServiceHealth[]> {
+    const services: (keyof typeof serviceConfig)[] = [
+      'users',
+      'products',
+      'checkout',
+      'payments',
+    ];
+
+    const healthChecks = await Promise.allSettled(
+      services.map((serviceName) => this.checkServiceHealth(serviceName)),
+    );
+
+    return healthChecks.map((result, index) => {
+      if (result.status === 'fulfilled') {
+        return result.value;
+      } else {
+        return {
+          name: services[index],
+          url: serviceConfig[services[index]].url,
+          status: HealthStatus.UNHEALTHY,
+          responseTime: 0,
+          lastCheck: new Date(),
+          error: result.reason?.message || 'Unknown error',
+        };
+      }
+    });
+  }
+
+  getCachedHealth(serviceName: string): ServiceHealth | undefined {
+    return this.healthCache.get(serviceName);
+  }
+
+  getAllCachedHealth(): ServiceHealth[] {
+    return Array.from(this.healthCache.values());
   }
 }
