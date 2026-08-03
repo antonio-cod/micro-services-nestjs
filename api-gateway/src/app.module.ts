@@ -11,6 +11,9 @@ import { AuthModule } from './auth/auth.module';
 import { CustomThrottlerGuard } from './guards/throttler.guard';
 import { APP_GUARD } from '@nestjs/core';
 import { HealthModule } from './health/health.module';
+import { HealthCheckService } from './common/health/health-check.service';
+import { CircuitBreakerModule } from './common/circuit-breaker/circuit-breaker.module';
+import { FallbackModule } from './common/fallback/fallback.module';
 
 @Module({
   imports: [
@@ -42,6 +45,9 @@ import { HealthModule } from './health/health.module';
     MiddlewareModule,
     AuthModule,
     HealthModule,
+    HealthCheckService,
+    FallbackModule,
+    CircuitBreakerModule,
   ],
   controllers: [AppController],
   providers: [
