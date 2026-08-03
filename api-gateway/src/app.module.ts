@@ -10,6 +10,7 @@ import { LoggingMiddleware } from './middleware/looging/looging.middleware';
 import { AuthModule } from './auth/auth.module';
 import { CustomThrottlerGuard } from './guards/throttler.guard';
 import { APP_GUARD } from '@nestjs/core';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { APP_GUARD } from '@nestjs/core';
     ProxyModule,
     MiddlewareModule,
     AuthModule,
+    HealthModule,
   ],
   controllers: [AppController],
   providers: [

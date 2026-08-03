@@ -19,3 +19,6 @@ nest g gu auth/guard/role --flat
 nest g d auth/decorators/public --flat
 nest g d auth/decorators/roles --flat
 nest g d auth/decorators/current-user --flat
+nest g mo health
+nest g co health
+nest g s health --no-spec
