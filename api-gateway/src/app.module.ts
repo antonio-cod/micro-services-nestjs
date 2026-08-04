@@ -11,9 +11,10 @@ import { AuthModule } from './auth/auth.module';
 import { CustomThrottlerGuard } from './guards/throttler.guard';
 import { APP_GUARD } from '@nestjs/core';
 import { HealthModule } from './health/health.module';
-import { HealthCheckService } from './common/health/health-check.service';
 import { CircuitBreakerModule } from './common/circuit-breaker/circuit-breaker.module';
 import { FallbackModule } from './common/fallback/fallback.module';
+import { TimeoutModule } from './common/timeout/timeout.module';
+import { RetryModule } from './common/retry/retry.module';
 
 @Module({
   imports: [
@@ -45,9 +46,10 @@ import { FallbackModule } from './common/fallback/fallback.module';
     MiddlewareModule,
     AuthModule,
     HealthModule,
-    HealthCheckService,
     FallbackModule,
     CircuitBreakerModule,
+    TimeoutModule,
+    RetryModule,
   ],
   controllers: [AppController],
   providers: [

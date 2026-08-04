@@ -22,3 +22,9 @@ nest g d auth/decorators/current-user --flat
 nest g mo health
 nest g co health
 nest g s health --no-spec
+nest g mo common/timeout
+nest g itf common/timeout
+nest g s common/timeout
+nest g mo common/retry
+nest g s common/retry
+nest g itf common/retry
