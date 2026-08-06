@@ -28,3 +28,8 @@ nest g s common/timeout
 nest g mo common/retry
 nest g s common/retry
 nest g itf common/retry
+
+# Removendo git para subir todo codigo em um unico repositorio modelo monorepo
+
+// Dentro da pasta raiz execute esse comando mais no nome do micro por padrao o nestjs cria o git no micro services.
+rm -rf checkout-service/.git
