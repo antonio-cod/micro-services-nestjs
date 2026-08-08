@@ -16,3 +16,4 @@
 
     nest generate module events
     nest generate service events/rabbitmq --no-spec
+    nest g service events/payment-queue --no-spec
