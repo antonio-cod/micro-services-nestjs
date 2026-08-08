@@ -10,4 +10,5 @@ Infraestrutura de mensageria para o marketplace usando RabbitMQ.
 
 ```bash
 docker-compose up -d
+sudo apt install docker-compose-plugin
 ```

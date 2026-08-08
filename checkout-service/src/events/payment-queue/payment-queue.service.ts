@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-import type { RabbitmqService } from '../rabbitmq/rabbitmq.service';
-import type { PaymentOrderMessage } from '../payment-queue.interface';
+import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
+import { PaymentOrderMessage } from '../payment-queue.interface';
 
 @Injectable()
 export class PaymentQueueService {

@@ -11,6 +11,7 @@
     npm install amqplib
     npm install --save-dev @types/amqplib
     npm i -D @types/passport @types/passport-jwt
+    sudo apt install docker-compose-plugin
 
 # comandos
 
