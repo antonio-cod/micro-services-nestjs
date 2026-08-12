@@ -42,6 +42,7 @@ describe('AppController (e2e)', () => {
     seller: `e2e-seller-${runId}@example.com`,
     concurrent: `e2e-concurrent-${runId}@example.com`,
     inactive: `e2e-inactive-${runId}@example.com`,
+    inactiveSeller: `e2e-inactive-seller-${runId}@example.com`,
     publicRoute: `e2e-public-${runId}@example.com`,
   };
 
@@ -368,6 +369,246 @@ describe('AppController (e2e)', () => {
         .send({ email: emails.buyer, password: 'secret123' })
         .expect(200);
     });
+  });
+
+  describe('GET /users', () => {
+    let token: string;
+    let buyerId: string;
+    let inactiveUserId: string;
+
+    beforeAll(async () => {
+      const loginResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: emails.buyer, password: 'secret123' })
+        .expect(200);
+      const loginBody = loginResponse.body as LoginResponseBody;
+      token = loginBody.token;
+      buyerId = loginBody.user.id;
+
+      const inactiveUser = await usersRepository.findOneByOrFail({
+        email: emails.inactive,
+      });
+      inactiveUserId = inactiveUser.id;
+
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          email: emails.inactiveSeller,
+          password: 'secret123',
+          firstName: 'Inactive',
+          lastName: 'Seller',
+          role: UserRole.SELLER,
+        })
+        .expect(201);
+      await usersRepository.update(
+        { email: emails.inactiveSeller },
+        { status: UserStatus.INACTIVE },
+      );
+    });
+
+    it('returns the current persisted profile through the static route', async () => {
+      await usersRepository.update(
+        { id: buyerId },
+        { firstName: 'Updated profile' },
+      );
+
+      const response = await request(app.getHttpServer())
+        .get('/users/profile')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        id: buyerId,
+        email: emails.buyer,
+        firstName: 'Updated profile',
+        role: UserRole.BUYER,
+        status: UserStatus.ACTIVE,
+      });
+      const body = response.body as Record<string, unknown>;
+      expect(Object.keys(body).sort()).toEqual([
+        'createdAt',
+        'email',
+        'firstName',
+        'id',
+        'lastName',
+        'role',
+        'status',
+        'updatedAt',
+      ]);
+      expect(response.body).not.toHaveProperty('password');
+    });
+
+    it('returns only active sellers through the static route', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/users/sellers')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(response.body).toEqual(expect.any(Array));
+      expect(response.body).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            email: emails.seller,
+            role: UserRole.SELLER,
+            status: UserStatus.ACTIVE,
+          }),
+        ]),
+      );
+      const sellers = response.body as Array<Record<string, unknown>>;
+      expect(sellers.some(({ email }) => email === emails.buyer)).toBe(false);
+      expect(sellers.some(({ email }) => email === emails.inactiveSeller)).toBe(
+        false,
+      );
+      expect(
+        sellers.every(
+          (seller) =>
+            seller.role === UserRole.SELLER &&
+            seller.status === UserStatus.ACTIVE &&
+            !('password' in seller),
+        ),
+      ).toBe(true);
+    });
+
+    it('returns an empty list when there are no active sellers', async () => {
+      const activeSellers = await usersRepository.findBy({
+        role: UserRole.SELLER,
+        status: UserStatus.ACTIVE,
+      });
+      const activeSellerIds = activeSellers.map(({ id }) => id);
+
+      try {
+        if (activeSellerIds.length > 0) {
+          await usersRepository.update(
+            { id: In(activeSellerIds) },
+            { status: UserStatus.INACTIVE },
+          );
+        }
+
+        const response = await request(app.getHttpServer())
+          .get('/users/sellers')
+          .set('Authorization', `Bearer ${token}`)
+          .expect(200);
+
+        expect(response.body).toEqual([]);
+      } finally {
+        if (activeSellerIds.length > 0) {
+          await usersRepository.update(
+            { id: In(activeSellerIds) },
+            { status: UserStatus.ACTIVE },
+          );
+        }
+      }
+    });
+
+    it('returns a user of any role and status by id without password', async () => {
+      const response = await request(app.getHttpServer())
+        .get(`/users/${inactiveUserId}`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(response.body).toMatchObject({
+        id: inactiveUserId,
+        email: emails.inactive,
+        role: UserRole.BUYER,
+        status: UserStatus.INACTIVE,
+      });
+      expect(response.body).not.toHaveProperty('password');
+    });
+
+    it('returns 404 for an unknown valid UUID', async () => {
+      const response = await request(app.getHttpServer())
+        .get('/users/00000000-0000-4000-8000-000000000000')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(404);
+
+      expect(response.body).toMatchObject({
+        statusCode: 404,
+        message: 'Usuário não encontrado',
+        error: 'Not Found',
+      });
+      expect(JSON.stringify(response.body)).not.toContain('password');
+    });
+
+    it('returns 400 for a malformed UUID', async () => {
+      await request(app.getHttpServer())
+        .get('/users/not-a-uuid')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(400);
+    });
+
+    it('returns 401 when a valid token references a deleted user', async () => {
+      const orphanToken = await new JwtService({
+        secret: jwtSecret,
+      }).signAsync({
+        sub: '00000000-0000-4000-8000-000000000001',
+        email: 'deleted@example.com',
+        role: UserRole.BUYER,
+      });
+
+      await request(app.getHttpServer())
+        .get('/users/profile')
+        .set('Authorization', `Bearer ${orphanToken}`)
+        .expect(401);
+    });
+
+    const protectedRoutes = [
+      '/users/profile',
+      '/users/sellers',
+      '/users/00000000-0000-4000-8000-000000000000',
+    ];
+
+    it.each(protectedRoutes)('rejects %s without a token', async (route) => {
+      await request(app.getHttpServer()).get(route).expect(401);
+    });
+
+    it.each(protectedRoutes)(
+      'rejects %s with a malformed token',
+      async (route) => {
+        await request(app.getHttpServer())
+          .get(route)
+          .set('Authorization', 'Bearer invalid.token')
+          .expect(401);
+      },
+    );
+
+    it.each(protectedRoutes)(
+      'rejects %s with an invalid signature',
+      async (route) => {
+        const invalidToken = await new JwtService({
+          secret: 'different-secret',
+        }).signAsync({
+          sub: buyerId,
+          email: emails.buyer,
+          role: UserRole.BUYER,
+        });
+
+        await request(app.getHttpServer())
+          .get(route)
+          .set('Authorization', `Bearer ${invalidToken}`)
+          .expect(401);
+      },
+    );
+
+    it.each(protectedRoutes)(
+      'rejects %s with an expired token',
+      async (route) => {
+        const expiredToken = await new JwtService({
+          secret: jwtSecret,
+        }).signAsync(
+          {
+            sub: buyerId,
+            email: emails.buyer,
+            role: UserRole.BUYER,
+          },
+          { expiresIn: -1 },
+        );
+
+        await request(app.getHttpServer())
+          .get(route)
+          .set('Authorization', `Bearer ${expiredToken}`)
+          .expect(401);
+      },
+    );
   });
 
   describe('global JWT protection', () => {
