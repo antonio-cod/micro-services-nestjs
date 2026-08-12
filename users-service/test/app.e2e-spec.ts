@@ -8,11 +8,29 @@ import { User } from './../src/users/entities/user.entity';
 import { UserRole } from './../src/users/enums/user-role.enum';
 import { UserStatus } from './../src/users/enums/user-status.enum';
 import { compare, getRounds } from 'bcryptjs';
+import { JwtService } from '@nestjs/jwt';
+
+const jwtSecret = 'users-service-e2e-jwt-secret';
+process.env.JWT_SECRET = jwtSecret;
 
 interface ErrorResponseBody {
   statusCode: number;
   message: string | string[];
   error: string;
+}
+
+interface LoginResponseBody {
+  user: {
+    id: string;
+    email: string;
+    firstName: string;
+    lastName: string;
+    role: UserRole;
+    status: UserStatus;
+    createdAt: string;
+    updatedAt: string;
+  };
+  token: string;
 }
 
 describe('AppController (e2e)', () => {
@@ -23,6 +41,7 @@ describe('AppController (e2e)', () => {
     buyer: `e2e-buyer-${runId}@example.com`,
     seller: `e2e-seller-${runId}@example.com`,
     concurrent: `e2e-concurrent-${runId}@example.com`,
+    inactive: `e2e-inactive-${runId}@example.com`,
   };
 
   beforeAll(async () => {
@@ -187,6 +206,140 @@ describe('AppController (e2e)', () => {
       await expect(
         usersRepository.countBy({ email: input.email }),
       ).resolves.toBe(1);
+    });
+  });
+
+  describe('POST /auth/login', () => {
+    it.each([
+      [UserRole.BUYER, emails.buyer],
+      [UserRole.SELLER, emails.seller],
+    ])(
+      'authenticates an active %s and returns a valid JWT',
+      async (role, email) => {
+        const response = await request(app.getHttpServer())
+          .post('/auth/login')
+          .send({ email, password: 'secret123' })
+          .expect(200);
+        const body = response.body as LoginResponseBody;
+
+        expect(Object.keys(body).sort()).toEqual(['token', 'user']);
+        expect(body.user).toMatchObject({
+          email,
+          firstName: 'Maria',
+          lastName: 'Silva',
+          role,
+          status: UserStatus.ACTIVE,
+        });
+        expect(Object.keys(body.user).sort()).toEqual([
+          'createdAt',
+          'email',
+          'firstName',
+          'id',
+          'lastName',
+          'role',
+          'status',
+          'updatedAt',
+        ]);
+        expect(typeof body.token).toBe('string');
+        expect(JSON.stringify(body)).not.toContain('secret123');
+        expect(body.user).not.toHaveProperty('password');
+
+        const payload = await new JwtService().verifyAsync<{
+          sub: string;
+          email: string;
+          role: UserRole;
+          iat: number;
+          exp: number;
+        }>(body.token, { secret: jwtSecret });
+        expect(payload).toMatchObject({
+          sub: body.user.id,
+          email,
+          role,
+        });
+        expect(payload.exp - payload.iat).toBe(24 * 60 * 60);
+        expect(payload).not.toHaveProperty('password');
+        await expect(
+          new JwtService().verifyAsync(body.token, {
+            secret: 'different-secret',
+          }),
+        ).rejects.toThrow();
+      },
+    );
+
+    it('returns indistinguishable errors for unknown email and wrong password', async () => {
+      const unknownResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: 'unknown@example.com', password: 'secret123' })
+        .expect(401);
+      const wrongPasswordResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: emails.buyer, password: 'wrong-password' })
+        .expect(401);
+
+      expect(unknownResponse.body).toMatchObject({
+        statusCode: 401,
+        message: 'Credenciais inválidas',
+        error: 'Unauthorized',
+      });
+      expect(wrongPasswordResponse.body).toEqual(unknownResponse.body);
+      expect(unknownResponse.body).not.toHaveProperty('token');
+    });
+
+    it('reveals inactive status only after valid credentials', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .send({
+          email: emails.inactive,
+          password: 'secret123',
+          firstName: 'Inactive',
+          lastName: 'User',
+          role: UserRole.BUYER,
+        })
+        .expect(201);
+      await usersRepository.update(
+        { email: emails.inactive },
+        { status: UserStatus.INACTIVE },
+      );
+
+      const inactiveResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: emails.inactive, password: 'secret123' })
+        .expect(401);
+      expect(inactiveResponse.body).toMatchObject({
+        statusCode: 401,
+        message: 'Conta inativa',
+        error: 'Unauthorized',
+      });
+      expect(inactiveResponse.body).not.toHaveProperty('token');
+
+      const wrongPasswordResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: emails.inactive, password: 'wrong-password' })
+        .expect(401);
+      const wrongPasswordBody = wrongPasswordResponse.body as ErrorResponseBody;
+      expect(wrongPasswordBody.message).toBe('Credenciais inválidas');
+    });
+
+    it.each([
+      ['missing fields', {}],
+      ['invalid email', { email: 'invalid', password: 'secret123' }],
+      ['short password', { email: emails.buyer, password: '12345' }],
+      ['null values', { email: null, password: null }],
+      ['invalid types', { email: 123, password: 123456 }],
+      [
+        'extra field',
+        { email: emails.buyer, password: 'secret123', role: UserRole.BUYER },
+      ],
+    ])('rejects %s without issuing a token', async (_scenario, body) => {
+      const response = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send(body)
+        .expect(400);
+      const errorBody = response.body as ErrorResponseBody;
+
+      expect(errorBody.statusCode).toBe(400);
+      expect(errorBody).not.toHaveProperty('token');
+      expect(JSON.stringify(errorBody)).not.toContain('secret123');
     });
   });
 

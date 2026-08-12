@@ -1,12 +1,23 @@
-import { ConflictException, Injectable } from '@nestjs/common';
+import {
+  ConflictException,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
-import { hash } from 'bcryptjs';
+import { compare, hash } from 'bcryptjs';
 import { Repository } from 'typeorm';
 import { User } from '../users/entities/user.entity';
 import { UserStatus } from '../users/enums/user-status.enum';
+import { LoginDto } from './dto/login.dto';
 import { RegisterDto } from './dto/register.dto';
 
-export type RegisteredUser = Omit<User, 'password'>;
+export type PublicUser = Omit<User, 'password'>;
+
+export interface LoginResult {
+  user: PublicUser;
+  token: string;
+}
 
 @Injectable()
 export class AuthService {
@@ -15,9 +26,10 @@ export class AuthService {
   constructor(
     @InjectRepository(User)
     private readonly usersRepository: Repository<User>,
+    private readonly jwtService: JwtService,
   ) {}
 
-  async register(registerDto: RegisterDto): Promise<RegisteredUser> {
+  async register(registerDto: RegisterDto): Promise<PublicUser> {
     const existingUser = await this.usersRepository.findOneBy({
       email: registerDto.email,
     });
@@ -38,7 +50,7 @@ export class AuthService {
 
     try {
       const savedUser = await this.usersRepository.save(user);
-      return this.toRegisteredUser(savedUser);
+      return this.toPublicUser(savedUser);
     } catch (error: unknown) {
       if (this.isUniqueConstraintViolation(error)) {
         throw new ConflictException('Email já cadastrado');
@@ -48,7 +60,29 @@ export class AuthService {
     }
   }
 
-  private toRegisteredUser(user: User): RegisteredUser {
+  async login(loginDto: LoginDto): Promise<LoginResult> {
+    const user = await this.usersRepository.findOneBy({
+      email: loginDto.email,
+    });
+
+    if (!user || !(await compare(loginDto.password, user.password))) {
+      throw new UnauthorizedException('Credenciais inválidas');
+    }
+
+    if (user.status !== UserStatus.ACTIVE) {
+      throw new UnauthorizedException('Conta inativa');
+    }
+
+    const token = await this.jwtService.signAsync({
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    });
+
+    return { user: this.toPublicUser(user), token };
+  }
+
+  private toPublicUser(user: User): PublicUser {
     return {
       id: user.id,
       email: user.email,
