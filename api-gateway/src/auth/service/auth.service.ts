@@ -1,6 +1,5 @@
 import { HttpService } from '@nestjs/axios';
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { JwtService } from '@nestjs/jwt';
 import { firstValueFrom } from 'rxjs';
 import { serviceConfig } from '../../config/gateway.config';
 import { RegisterDto } from '../dtos/register.dto';
@@ -29,16 +28,33 @@ export interface AuthResponse {
   };
 }
 
+export interface ValidatedUser {
+  userId: string;
+  email: string;
+  role: string;
+}
+
 @Injectable()
 export class AuthService {
-  constructor(
-    private readonly jwtService: JwtService,
-    private readonly httpService: HttpService,
-  ) {}
+  constructor(private readonly httpService: HttpService) {}
 
-  validateJwtToken(token: string): Promise<AuthResponse> {
+  async validateJwtToken(authorization: string): Promise<ValidatedUser> {
     try {
-      return this.jwtService.verify(token);
+      const { data } = await firstValueFrom(
+        this.httpService.get<ValidatedUser>(
+          `${serviceConfig.users.url}/auth/validate-token`,
+          {
+            headers: { Authorization: authorization },
+            timeout: serviceConfig.users.timeout,
+          },
+        ),
+      );
+
+      if (!data.userId || !data.email || !data.role) {
+        throw new Error('Invalid validation response');
+      }
+
+      return data;
     } catch (error) {
       throw new UnauthorizedException('Invalid JWT token');
     }
