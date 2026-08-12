@@ -54,53 +54,57 @@ export class ProxyService {
     try {
       return await this.circuitBreakerService.executeWithCircuitBreaker(
         async () => {
-        return await this.retryService.executeWithExponentialBackoff(
-          async () => {
-            return await this.timeoutService.executeWithCustomTimeout(
-              async () => {
-                const enhancedHeaders: Record<string, string> = { ...headers };
+          return await this.retryService.executeWithExponentialBackoff(
+            async () => {
+              return await this.timeoutService.executeWithCustomTimeout(
+                async () => {
+                  const enhancedHeaders: Record<string, string> = {
+                    ...headers,
+                  };
 
-                if (userInfo) {
-                  enhancedHeaders['x-user-id'] = userInfo.userId;
-                  enhancedHeaders['x-user-email'] = userInfo.email;
-                  enhancedHeaders['x-user-role'] = userInfo.role;
-                }
+                  if (userInfo) {
+                    enhancedHeaders['x-user-id'] = userInfo.userId;
+                    enhancedHeaders['x-user-email'] = userInfo.email;
+                    enhancedHeaders['x-user-role'] = userInfo.role;
+                  }
 
-                const response = await firstValueFrom(
-                  this.httpService.request({
-                    method: method.toLowerCase(),
-                    url,
-                    data,
-                    headers: enhancedHeaders,
-                    timeout: service.timeout,
-                    validateStatus: (status) => status < 500,
-                  }),
-                );
-
-                if (method.toLowerCase() === 'get') {
-                  this.cacheFallbackService.setCachedData(
-                    `${serviceName}-${path}`,
-                    response.data as unknown,
+                  const response = await firstValueFrom(
+                    this.httpService.request({
+                      method: method.toLowerCase(),
+                      url,
+                      data,
+                      headers: enhancedHeaders,
+                      timeout: service.timeout,
+                      validateStatus: (status) => status < 500,
+                    }),
                   );
-                }
 
-                return {
-                  data: response.data as unknown,
-                  status: response.status,
-                };
-              },
-              service.timeout,
-            );
-          },
-          4,
-        );
+                  if (method.toLowerCase() === 'get') {
+                    this.cacheFallbackService.setCachedData(
+                      `${serviceName}-${path}`,
+                      response.data as unknown,
+                    );
+                  }
+
+                  return {
+                    data: response.data as unknown,
+                    status: response.status,
+                  };
+                },
+                service.timeout,
+              );
+            },
+            4,
+          );
         },
         `proxy-${serviceName}`,
         { failureThreshold: 3, timeout: 30000, resetTimeout: 30000 },
         fallback,
       );
     } catch {
-      throw new ServiceUnavailableException(`${serviceName} service unavailable`);
+      throw new ServiceUnavailableException(
+        `${serviceName} service unavailable`,
+      );
     }
   }
 

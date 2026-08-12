@@ -29,8 +29,8 @@ describe('ProxyService', () => {
       ),
     };
     const timeout = {
-      executeWithCustomTimeout: jest.fn(
-        (operation: () => Promise<unknown>) => operation(),
+      executeWithCustomTimeout: jest.fn((operation: () => Promise<unknown>) =>
+        operation(),
       ),
     };
     const fallback = {

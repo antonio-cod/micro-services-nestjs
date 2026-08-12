@@ -55,7 +55,7 @@ export class AuthService {
       }
 
       return data;
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException('Invalid JWT token');
     }
   }
@@ -70,7 +70,7 @@ export class AuthService {
       );
 
       return data;
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException('Invalid session token');
     }
   }
@@ -84,7 +84,7 @@ export class AuthService {
       );
 
       return data;
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException('Invalid login credentials');
     }
   }
@@ -100,7 +100,7 @@ export class AuthService {
       );
 
       return data;
-    } catch (error) {
+    } catch {
       throw new UnauthorizedException('Registration failed');
     }
   }

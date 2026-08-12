@@ -1,7 +1,7 @@
-import { ThrottlerGuard } from './throttler.guard';
+import { CustomThrottlerGuard } from './throttler.guard';
 
 describe('ThrottlerGuard', () => {
   it('should be defined', () => {
-    expect(new ThrottlerGuard()).toBeDefined();
+    expect(CustomThrottlerGuard).toBeDefined();
   });
 });

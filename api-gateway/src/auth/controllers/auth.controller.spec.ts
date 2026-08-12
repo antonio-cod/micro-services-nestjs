@@ -15,20 +15,23 @@ describe('AuthController', () => {
   it.each([
     ['login', '/auth/login', 200],
     ['register', '/auth/register', 201],
-  ] as const)('proxies %s and preserves its status', async (method, path, status) => {
-    const body = { email: 'buyer@example.com', password: 'secret123' };
-    const data = { ok: true };
-    proxyService.proxyRequest.mockResolvedValue({ data, status });
+  ] as const)(
+    'proxies %s and preserves its status',
+    async (method, path, status) => {
+      const body = { email: 'buyer@example.com', password: 'secret123' };
+      const data = { ok: true };
+      proxyService.proxyRequest.mockResolvedValue({ data, status });
 
-    await expect(
-      controller[method](body as never, response as never),
-    ).resolves.toBe(data);
-    expect(proxyService.proxyRequest).toHaveBeenCalledWith(
-      'users',
-      'POST',
-      path,
-      body,
-    );
-    expect(response.status).toHaveBeenCalledWith(status);
-  });
+      await expect(
+        controller[method](body as never, response as never),
+      ).resolves.toBe(data);
+      expect(proxyService.proxyRequest).toHaveBeenCalledWith(
+        'users',
+        'POST',
+        path,
+        body,
+      );
+      expect(response.status).toHaveBeenCalledWith(status);
+    },
+  );
 });

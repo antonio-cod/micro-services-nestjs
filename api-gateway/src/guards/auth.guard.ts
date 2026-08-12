@@ -3,7 +3,7 @@ import {
   Injectable,
   UnauthorizedException,
 } from '@nestjs/common';
-import type { Reflector } from '@nestjs/core';
+import { Reflector } from '@nestjs/core';
 import { AuthGuard } from '@nestjs/passport';
 import { Observable } from 'rxjs';
 
@@ -40,8 +40,8 @@ export class JwtAuthGuard extends JwtGuard {
     err: Error | null,
     user: JwtUser | false,
     _info: unknown,
-    context: ExecutionContext,
-    status?: unknown,
+    _context: ExecutionContext,
+    _status?: unknown,
   ): TUSer {
     if (err || !user) {
       throw err || new UnauthorizedException();

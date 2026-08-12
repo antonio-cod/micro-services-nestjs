@@ -707,6 +707,16 @@ describe('AppController (e2e)', () => {
     });
   });
 
+  describe('GET /health', () => {
+    it('is public and identifies the users-service', async () => {
+      await request(app.getHttpServer())
+        .get('/health')
+        .set('Authorization', 'Bearer invalid.token')
+        .expect(200)
+        .expect({ status: 'ok', service: 'users-service' });
+    });
+  });
+
   afterAll(async () => {
     await usersRepository.delete({ email: In(Object.values(emails)) });
     await app.close();

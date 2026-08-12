@@ -1,7 +1,7 @@
-import { LoogingMiddleware } from './looging.middleware';
+import { LoggingMiddleware } from './looging.middleware';
 
 describe('LoogingMiddleware', () => {
   it('should be defined', () => {
-    expect(new LoogingMiddleware()).toBeDefined();
+    expect(new LoggingMiddleware()).toBeDefined();
   });
 });
