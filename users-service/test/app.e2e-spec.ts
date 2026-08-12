@@ -42,6 +42,7 @@ describe('AppController (e2e)', () => {
     seller: `e2e-seller-${runId}@example.com`,
     concurrent: `e2e-concurrent-${runId}@example.com`,
     inactive: `e2e-inactive-${runId}@example.com`,
+    publicRoute: `e2e-public-${runId}@example.com`,
   };
 
   beforeAll(async () => {
@@ -60,13 +61,6 @@ describe('AppController (e2e)', () => {
     await app.init();
 
     usersRepository = moduleFixture.get(DataSource).getRepository(User);
-  });
-
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
   });
 
   describe('POST /auth/register', () => {
@@ -207,6 +201,20 @@ describe('AppController (e2e)', () => {
         usersRepository.countBy({ email: input.email }),
       ).resolves.toBe(1);
     });
+
+    it('remains public when an invalid Bearer token is provided', async () => {
+      await request(app.getHttpServer())
+        .post('/auth/register')
+        .set('Authorization', 'Bearer invalid.token')
+        .send({
+          email: emails.publicRoute,
+          password: 'secret123',
+          firstName: 'Public',
+          lastName: 'Route',
+          role: UserRole.BUYER,
+        })
+        .expect(201);
+    });
   });
 
   describe('POST /auth/login', () => {
@@ -340,6 +348,74 @@ describe('AppController (e2e)', () => {
       expect(errorBody.statusCode).toBe(400);
       expect(errorBody).not.toHaveProperty('token');
       expect(JSON.stringify(errorBody)).not.toContain('secret123');
+    });
+
+    it('remains public when an expired Bearer token is provided', async () => {
+      const expiredToken = await new JwtService({
+        secret: jwtSecret,
+      }).signAsync(
+        {
+          sub: '91afac99-0cd9-4438-945e-2766594a725c',
+          email: emails.buyer,
+          role: UserRole.BUYER,
+        },
+        { expiresIn: -1 },
+      );
+
+      await request(app.getHttpServer())
+        .post('/auth/login')
+        .set('Authorization', `Bearer ${expiredToken}`)
+        .send({ email: emails.buyer, password: 'secret123' })
+        .expect(200);
+    });
+  });
+
+  describe('global JWT protection', () => {
+    it('allows a protected route with a valid Bearer token', async () => {
+      const loginResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: emails.buyer, password: 'secret123' })
+        .expect(200);
+      const { token } = loginResponse.body as LoginResponseBody;
+
+      await request(app.getHttpServer())
+        .get('/')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200)
+        .expect('Hello World!');
+    });
+
+    it.each([
+      ['without an Authorization header', undefined],
+      ['with a non-Bearer scheme', 'Basic credentials'],
+      ['with a malformed token', 'Bearer invalid.token'],
+      [
+        'with an invalid signature',
+        `Bearer ${new JwtService({ secret: 'different-secret' }).sign({
+          sub: '91afac99-0cd9-4438-945e-2766594a725c',
+          email: emails.buyer,
+          role: UserRole.BUYER,
+        })}`,
+      ],
+      [
+        'with an expired token',
+        `Bearer ${new JwtService({ secret: jwtSecret }).sign(
+          {
+            sub: '91afac99-0cd9-4438-945e-2766594a725c',
+            email: emails.buyer,
+            role: UserRole.BUYER,
+          },
+          { expiresIn: -1 },
+        )}`,
+      ],
+    ])('returns 401 %s', async (_scenario, authorization) => {
+      const pendingRequest = request(app.getHttpServer()).get('/');
+
+      if (authorization) {
+        pendingRequest.set('Authorization', authorization);
+      }
+
+      await pendingRequest.expect(401);
     });
   });
 

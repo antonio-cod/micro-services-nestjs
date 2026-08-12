@@ -1,5 +1,8 @@
 import { ConfigService } from '@nestjs/config';
-import { createJwtOptions } from './auth.module';
+import { APP_GUARD } from '@nestjs/core';
+import { MODULE_METADATA } from '@nestjs/common/constants';
+import { AuthModule, createJwtOptions } from './auth.module';
+import { JwtAuthGuard } from './guards/jwt-auth.guard';
 
 describe('AuthModule JWT configuration', () => {
   it('uses the configured secret and a 24-hour expiration', () => {
@@ -25,4 +28,20 @@ describe('AuthModule JWT configuration', () => {
       );
     },
   );
+
+  it('registers JwtAuthGuard as a global guard', () => {
+    const providers = Reflect.getMetadata(
+      MODULE_METADATA.PROVIDERS,
+      AuthModule,
+    ) as Array<unknown>;
+
+    expect(providers).toEqual(
+      expect.arrayContaining([
+        {
+          provide: APP_GUARD,
+          useClass: JwtAuthGuard,
+        },
+      ]),
+    );
+  });
 });
