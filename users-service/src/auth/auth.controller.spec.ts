@@ -74,4 +74,18 @@ describe('AuthController', () => {
     await expect(controller.login(input)).resolves.toBe(result);
     expect(authService.login).toHaveBeenCalledWith(input);
   });
+
+  it('returns only the authenticated token claims', () => {
+    const user = {
+      id: '91afac99-0cd9-4438-945e-2766594a725c',
+      email: 'buyer@example.com',
+      role: UserRole.BUYER,
+    };
+
+    expect(controller.validateToken({ user } as never)).toEqual({
+      userId: user.id,
+      email: user.email,
+      role: user.role,
+    });
+  });
 });

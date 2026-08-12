@@ -660,6 +660,53 @@ describe('AppController (e2e)', () => {
     });
   });
 
+  describe('GET /auth/validate-token', () => {
+    it('returns only the claims from a valid token', async () => {
+      const loginResponse = await request(app.getHttpServer())
+        .post('/auth/login')
+        .send({ email: emails.buyer, password: 'secret123' })
+        .expect(200);
+      const { token, user } = loginResponse.body as LoginResponseBody;
+
+      const response = await request(app.getHttpServer())
+        .get('/auth/validate-token')
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      expect(response.body).toEqual({
+        userId: user.id,
+        email: user.email,
+        role: user.role,
+      });
+    });
+
+    it.each([
+      undefined,
+      'Bearer invalid.token',
+      `Bearer ${new JwtService({ secret: 'different-secret' }).sign({
+        sub: '91afac99-0cd9-4438-945e-2766594a725c',
+        email: emails.buyer,
+        role: UserRole.BUYER,
+      })}`,
+      `Bearer ${new JwtService({ secret: jwtSecret }).sign(
+        {
+          sub: '91afac99-0cd9-4438-945e-2766594a725c',
+          email: emails.buyer,
+          role: UserRole.BUYER,
+        },
+        { expiresIn: -1 },
+      )}`,
+    ])('returns 401 for an invalid credential', async (authorization) => {
+      const pendingRequest = request(app.getHttpServer()).get(
+        '/auth/validate-token',
+      );
+
+      if (authorization) pendingRequest.set('Authorization', authorization);
+
+      await pendingRequest.expect(401);
+    });
+  });
+
   afterAll(async () => {
     await usersRepository.delete({ email: In(Object.values(emails)) });
     await app.close();
