@@ -15,6 +15,7 @@ import { CircuitBreakerModule } from './common/circuit-breaker/circuit-breaker.m
 import { FallbackModule } from './common/fallback/fallback.module';
 import { TimeoutModule } from './common/timeout/timeout.module';
 import { RetryModule } from './common/retry/retry.module';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { RetryModule } from './common/retry/retry.module';
     CircuitBreakerModule,
     TimeoutModule,
     RetryModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [

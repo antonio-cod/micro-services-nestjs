@@ -1,5 +1,9 @@
 import { HttpService } from '@nestjs/axios';
-import { Injectable, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  ServiceUnavailableException,
+} from '@nestjs/common';
 import { firstValueFrom } from 'rxjs';
 import { CircuitBreakerService } from '../../common/circuit-breaker/circuit-breaker.service';
 import { CacheFallbackService } from '../../common/fallback/cache.fallback';
@@ -14,7 +18,10 @@ interface UserInfo {
   role: string;
 }
 
-type HttpMethod = 'get' | 'post' | 'put' | 'patch' | 'delete';
+export interface ProxyResponse<T = unknown> {
+  data: T;
+  status: number;
+}
 
 @Injectable()
 export class ProxyService {
@@ -36,7 +43,7 @@ export class ProxyService {
     data?: unknown,
     headers?: Record<string, string>,
     userInfo?: UserInfo,
-  ) {
+  ): Promise<ProxyResponse> {
     const service = serviceConfig[serviceName];
     const url = `${service.url}${path}`;
 
@@ -44,55 +51,64 @@ export class ProxyService {
 
     const fallback = this.createServiceFallback(serviceName, method, path);
 
-    return this.circuitBreakerService.executeWithCircuitBreaker(
-      async () => {
+    try {
+      return await this.circuitBreakerService.executeWithCircuitBreaker(
+        async () => {
         return await this.retryService.executeWithExponentialBackoff(
           async () => {
             return await this.timeoutService.executeWithCustomTimeout(
               async () => {
-                const enhancedHeaders = {
-                  ...headers,
-                  'x-user-id': userInfo?.userId,
-                  'x-user-email': userInfo?.email,
-                  'x-user-role': userInfo?.role,
-                };
+                const enhancedHeaders: Record<string, string> = { ...headers };
+
+                if (userInfo) {
+                  enhancedHeaders['x-user-id'] = userInfo.userId;
+                  enhancedHeaders['x-user-email'] = userInfo.email;
+                  enhancedHeaders['x-user-role'] = userInfo.role;
+                }
 
                 const response = await firstValueFrom(
                   this.httpService.request({
-                    method: method.toLowerCase() as HttpMethod,
+                    method: method.toLowerCase(),
                     url,
                     data,
                     headers: enhancedHeaders,
                     timeout: service.timeout,
+                    validateStatus: (status) => status < 500,
                   }),
                 );
 
                 if (method.toLowerCase() === 'get') {
                   this.cacheFallbackService.setCachedData(
                     `${serviceName}-${path}`,
-                    response.data,
+                    response.data as unknown,
                   );
                 }
 
-                return response.data;
+                return {
+                  data: response.data as unknown,
+                  status: response.status,
+                };
               },
               service.timeout,
             );
           },
           4,
         );
-      },
-      `proxy-${serviceName}`,
-      { failureThreshold: 3, timeout: 30000, resetTimeout: 30000 },
-      fallback,
-    );
+        },
+        `proxy-${serviceName}`,
+        { failureThreshold: 3, timeout: 30000, resetTimeout: 30000 },
+        fallback,
+      );
+    } catch {
+      throw new ServiceUnavailableException(`${serviceName} service unavailable`);
+    }
   }
 
   private createServiceFallback(
     serviceName: string,
     method: string,
     path: string,
-  ) {
+  ): () => Promise<ProxyResponse> {
     switch (serviceName) {
       case 'users':
         if (path.includes('/auth/login')) {
@@ -110,7 +126,10 @@ export class ProxyService {
         if (method.toLowerCase() === 'get') {
           return this.cacheFallbackService.createCacheFallback(
             `products-${path}`,
-            { products: [], total: 0, page: 1, limit: 10 },
+            {
+              data: { products: [], total: 0, page: 1, limit: 10 },
+              status: 200,
+            },
           );
         }
 

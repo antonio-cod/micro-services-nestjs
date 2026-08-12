@@ -7,6 +7,7 @@ import { AuthService } from './service/auth.service';
 import { AuthController } from './controllers/auth.controller';
 import { JwtStrategy } from './strategies/jwt.strategy';
 import { JwtAuthGuard } from '../guards/auth.guard';
+import { ProxyModule } from '../proxy/proxy.module';
 
 @Module({
   imports: [
@@ -22,6 +23,7 @@ import { JwtAuthGuard } from '../guards/auth.guard';
       }),
       inject: [ConfigService],
     }),
+    ProxyModule,
   ],
   providers: [AuthService, JwtStrategy, JwtAuthGuard],
   exports: [AuthService, JwtAuthGuard],
