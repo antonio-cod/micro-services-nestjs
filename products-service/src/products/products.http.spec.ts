@@ -1,4 +1,8 @@
-import { INestApplication, ValidationPipe } from '@nestjs/common';
+import {
+  INestApplication,
+  NotFoundException,
+  ValidationPipe,
+} from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import { Test, TestingModule } from '@nestjs/testing';
@@ -12,9 +16,12 @@ import { ProductsService } from './products.service';
 
 const jwtSecret = 'products-create-http-test-secret';
 
-describe('POST /products (HTTP)', () => {
+describe('Products endpoints (HTTP)', () => {
   let app: INestApplication<App>;
   let create: jest.Mock<Promise<Product>, [CreateProductDto, string]>;
+  let findAll: jest.Mock<Promise<Product[]>, []>;
+  let findBySeller: jest.Mock<Promise<Product[]>, [string]>;
+  let findOne: jest.Mock<Promise<Product>, [string]>;
   const jwtService = new JwtService();
   const sellerId = '91afac99-0cd9-4438-945e-2766594a725c';
   const validBody = {
@@ -34,11 +41,19 @@ describe('POST /products (HTTP)', () => {
   beforeAll(async () => {
     process.env.JWT_SECRET = jwtSecret;
     create = jest.fn<Promise<Product>, [CreateProductDto, string]>();
+    findAll = jest.fn<Promise<Product[]>, []>();
+    findBySeller = jest.fn<Promise<Product[]>, [string]>();
+    findOne = jest.fn<Promise<Product>, [string]>();
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
       controllers: [ProductsController],
-      providers: [{ provide: ProductsService, useValue: { create } }],
+      providers: [
+        {
+          provide: ProductsService,
+          useValue: { create, findAll, findBySeller, findOne },
+        },
+      ],
     }).compile();
 
     app = moduleFixture.createNestApplication();
@@ -54,6 +69,9 @@ describe('POST /products (HTTP)', () => {
 
   beforeEach(() => {
     create.mockReset();
+    findAll.mockReset();
+    findBySeller.mockReset();
+    findOne.mockReset();
     create.mockImplementation((body, authenticatedSellerId) =>
       Promise.resolve({
         id: '1381eeaf-0171-44e3-b03a-86359448b2b9',
@@ -136,6 +154,115 @@ describe('POST /products (HTTP)', () => {
 
     const responseBody = response.body as { message: string[] };
     expect(responseBody.message.join(' ')).toContain(field);
+    expect(create).not.toHaveBeenCalled();
+  });
+
+  it('returns the public active product catalog without a token', async () => {
+    const products = [
+      {
+        id: '1381eeaf-0171-44e3-b03a-86359448b2b9',
+        name: 'Produto recente',
+        isActive: true,
+        createdAt: new Date('2026-08-13T13:00:00.000Z'),
+      },
+      {
+        id: 'c04045f0-04f3-4a22-91cc-76ff61341a47',
+        name: 'Produto antigo',
+        isActive: true,
+        createdAt: new Date('2026-08-13T12:00:00.000Z'),
+      },
+    ] as Product[];
+    findAll.mockResolvedValue(products);
+
+    const response = await request(app.getHttpServer())
+      .get('/products')
+      .expect(200);
+    const responseBody = response.body as Product[];
+
+    expect(responseBody).toHaveLength(2);
+    expect(responseBody.map((product) => product.id)).toEqual([
+      products[0].id,
+      products[1].id,
+    ]);
+    expect(findAll).toHaveBeenCalledWith();
+  });
+
+  it('returns an empty public product catalog', async () => {
+    findAll.mockResolvedValue([]);
+
+    const response = await request(app.getHttpServer())
+      .get('/products')
+      .expect(200);
+
+    expect(response.body).toEqual([]);
+  });
+
+  it('returns public active products for a seller using the prefixed route', async () => {
+    const products = [
+      {
+        id: '1381eeaf-0171-44e3-b03a-86359448b2b9',
+        sellerId,
+        isActive: true,
+      },
+    ] as Product[];
+    findBySeller.mockResolvedValue(products);
+
+    const response = await request(app.getHttpServer())
+      .get(`/products/seller/${sellerId}`)
+      .expect(200);
+
+    expect(response.body).toEqual(products);
+    expect(findBySeller).toHaveBeenCalledWith(sellerId);
+    expect(findOne).not.toHaveBeenCalled();
+  });
+
+  it('returns an empty public seller product list without 404', async () => {
+    findBySeller.mockResolvedValue([]);
+
+    const response = await request(app.getHttpServer())
+      .get(`/products/seller/${sellerId}`)
+      .expect(200);
+
+    expect(response.body).toEqual([]);
+  });
+
+  it.each([true, false])(
+    'returns a public product by id when isActive is %s',
+    async (isActive) => {
+      const product = {
+        id: '1381eeaf-0171-44e3-b03a-86359448b2b9',
+        name: 'Produto',
+        isActive,
+      } as Product;
+      findOne.mockResolvedValue(product);
+
+      const response = await request(app.getHttpServer())
+        .get(`/products/${product.id}`)
+        .expect(200);
+
+      expect(response.body).toEqual(product);
+      expect(findOne).toHaveBeenCalledWith(product.id);
+    },
+  );
+
+  it('returns 404 when the requested product does not exist', async () => {
+    const productId = '1381eeaf-0171-44e3-b03a-86359448b2b9';
+    findOne.mockRejectedValue(new NotFoundException('Produto não encontrado'));
+
+    const response = await request(app.getHttpServer())
+      .get(`/products/${productId}`)
+      .expect(404);
+    const responseBody = response.body as { message: string };
+
+    expect(responseBody.message).toBe('Produto não encontrado');
+  });
+
+  it('keeps POST /products protected when no token is provided', async () => {
+    await request(app.getHttpServer())
+      .post('/products')
+      .send(validBody)
+      .expect(401);
+
     expect(create).not.toHaveBeenCalled();
   });
 });
