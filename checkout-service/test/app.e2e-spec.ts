@@ -16,11 +16,15 @@ describe('AppController (e2e)', () => {
     await app.init();
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
+  it('/ (GET) is protected by default', () => {
+    return request(app.getHttpServer()).get('/').expect(401);
+  });
+
+  it('/health (GET) is public', () => {
+    return request(app.getHttpServer()).get('/health').expect(200).expect({
+      status: 'ok',
+      service: 'checkout-service',
+    });
   });
 
   afterEach(async () => {
