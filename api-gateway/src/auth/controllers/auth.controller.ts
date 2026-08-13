@@ -8,8 +8,8 @@ import {
 } from '@nestjs/common';
 import { ApiOperation, ApiResponse, ApiTags } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
-import type { LoginDto } from '../dtos/login.dto';
-import type { RegisterDto } from '../dtos/register.dto';
+import { LoginDto } from '../dtos/login.dto';
+import { RegisterDto } from '../dtos/register.dto';
 import { ProxyService } from '../../proxy/service/proxy.service';
 import type { Response } from 'express';
 

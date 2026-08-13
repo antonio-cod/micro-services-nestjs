@@ -16,6 +16,7 @@ import { FallbackModule } from './common/fallback/fallback.module';
 import { TimeoutModule } from './common/timeout/timeout.module';
 import { RetryModule } from './common/retry/retry.module';
 import { UsersModule } from './users/users.module';
+import { ProductsModule } from './products/products.module';
 
 @Module({
   imports: [
@@ -52,6 +53,7 @@ import { UsersModule } from './users/users.module';
     TimeoutModule,
     RetryModule,
     UsersModule,
+    ProductsModule,
   ],
   controllers: [AppController],
   providers: [

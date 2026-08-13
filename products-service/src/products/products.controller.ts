@@ -8,12 +8,14 @@ import {
   Req,
 } from '@nestjs/common';
 import { Request } from 'express';
+import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
 import { Public } from '../auth/decorators/public.decorator';
 import { AuthenticatedUser } from '../auth/interfaces/jwt-payload.interface';
 import { CreateProductDto } from './dto/create-product.dto';
 import { Product } from './entities/product.entity';
 import { ProductsService } from './products.service';
 
+@ApiTags('Products')
 @Controller('products')
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
@@ -37,6 +39,7 @@ export class ProductsController {
   }
 
   @Post()
+  @ApiBearerAuth('JWT-auth')
   create(
     @Body() createProductDto: CreateProductDto,
     @Req() request: Request & { user: AuthenticatedUser },
