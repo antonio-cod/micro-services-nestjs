@@ -40,6 +40,15 @@ describe('Cart entities metadata', () => {
     expect(relation?.options).toMatchObject({ eager: true, cascade: true });
   });
 
+  it('enforces one active cart per user', () => {
+    expect(
+      storage.indices.find(
+        (metadata) =>
+          metadata.target === Cart && metadata.name === 'UQ_cart_active_user',
+      ),
+    ).toMatchObject({ unique: true, where: `"status" = 'active'` });
+  });
+
   it('defines CartItem columns and the explicit cart join column', () => {
     expect(column(CartItem, 'cartId')?.options.type).toBe('uuid');
     expect(column(CartItem, 'productId')?.options.type).toBe('uuid');
@@ -78,5 +87,15 @@ describe('Cart entities metadata', () => {
           metadata.target === CartItem && metadata.propertyName === 'cart',
       )?.name,
     ).toBe('cartId');
+  });
+
+  it('enforces one item per product in a cart', () => {
+    const index = storage.indices.find(
+      (metadata) =>
+        metadata.target === CartItem &&
+        metadata.name === 'UQ_cart_item_product',
+    );
+    expect(index?.columns).toEqual(['cartId', 'productId']);
+    expect(index).toMatchObject({ unique: true });
   });
 });
