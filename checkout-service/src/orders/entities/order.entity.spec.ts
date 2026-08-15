@@ -1,5 +1,5 @@
 import { getMetadataArgsStorage } from 'typeorm';
-import { Order, OrderStatus } from './order.entity';
+import { Order, OrderStatus, PaymentMethod } from './order.entity';
 
 describe('Order entity metadata', () => {
   const storage = getMetadataArgsStorage();
@@ -18,10 +18,26 @@ describe('Order entity metadata', () => {
       precision: 10,
       scale: 2,
     });
+    expect(column('total')?.options.transformer).toBeDefined();
     expect(column('paymentMethod')?.options).toMatchObject({
       type: 'varchar',
       length: 50,
     });
+  });
+
+  it('defines supported payment methods and one order per cart', () => {
+    expect(Object.values(PaymentMethod)).toEqual([
+      'credit_card',
+      'debit_card',
+      'pix',
+      'boleto',
+    ]);
+    const index = storage.indices.find(
+      (metadata) =>
+        metadata.target === Order && metadata.name === 'UQ_order_cart',
+    );
+    expect(index?.columns).toEqual(['cartId']);
+    expect(index).toMatchObject({ unique: true });
   });
 
   it('defines status and timestamps', () => {

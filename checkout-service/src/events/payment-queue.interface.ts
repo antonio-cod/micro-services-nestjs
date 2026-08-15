@@ -1,3 +1,5 @@
+import type { PaymentMethod } from '../orders/entities/order.entity';
+
 export interface PaymentOrderMessage {
   orderId: string;
   userId: string;
@@ -7,7 +9,7 @@ export interface PaymentOrderMessage {
     quantity: number;
     price: number;
   }>;
-  paymentMethod: string;
+  paymentMethod: PaymentMethod;
   description?: string;
   createdAt?: Date;
   metadata?: {

@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
-import { PaymentOrderMessage } from '../payment-queue.interface';
+import type { PaymentOrderMessage } from '../payment-queue.interface';
 
 @Injectable()
 export class PaymentQueueService {
@@ -41,7 +41,7 @@ export class PaymentQueueService {
       this.logger.debug(
         `Payment order details: ${JSON.stringify(enrichmentMessage)}`,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error(
         `❌ Failed to publish payment order: orderId=${paymentOrder.orderId}`,
         error,

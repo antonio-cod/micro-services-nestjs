@@ -15,17 +15,17 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
 
   constructor(private configService: ConfigService) {}
 
-  async onModuleInit() {
+  async onModuleInit(): Promise<void> {
     await this.connect();
   }
 
-  async onModuleDestroy() {
+  async onModuleDestroy(): Promise<void> {
     await this.disconnect();
   }
 
-  private async connect() {
+  private async connect(): Promise<void> {
     try {
-      const rabbitmqUrl = this.configService.get<string>(
+      const rabbitmqUrl: string = this.configService.get<string>(
         'RABBITMQ_URL',
         'amqp://admin:admin@localhost:5672',
       );
@@ -35,30 +35,30 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
       this.logger.log('✅ Connected to RabbitMQ successfully');
 
       // Event listener para monitorar a conexão
-      this.connection.on('error', (err) => {
+      this.connection.on('error', (err: Error): void => {
         this.logger.error('❌ RabbitMQ connection error:', err);
       });
 
-      this.connection.on('close', () => {
+      this.connection.on('close', (): void => {
         this.logger.warn('⚠️ RabbitMQ connection closed');
       });
 
-      this.connection.on('blocked', (reason) => {
+      this.connection.on('blocked', (reason: string): void => {
         this.logger.warn('⚠️ RabbitMQ connection blocked:', reason);
       });
 
-      this.connection.on('unblocked', () => {
+      this.connection.on('unblocked', (): void => {
         this.logger.log('✅ RabbitMQ connection unblocked');
       });
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.warn(
         '⚠️ Failed to connect to RabbitMQ, cotinuing wihout message queue:',
-        error.message || error,
+        this.errorMessage(error),
       );
     }
   }
 
-  private async disconnect() {
+  private async disconnect(): Promise<void> {
     try {
       if (this.channel) {
         await this.channel.close();
@@ -69,7 +69,7 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
         await this.connection.close();
         this.logger.log('✅ Disconnected from RabbitMQ');
       }
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error('❌ Error disconnecting from RabbitMQ:', error);
     }
   }
@@ -85,21 +85,17 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
   async publishMessage(
     exchange: string,
     routingKey: string,
-    message: any,
+    message: unknown,
   ): Promise<void> {
     try {
       if (!this.channel) {
-        this.logger.warn(
-          '⚠️ RabbitMQ channel not available, skipping message publish',
-        );
-
-        return;
+        throw new Error('RabbitMQ channel not available');
       }
 
       await this.channel.assertExchange(exchange, 'topic', { durable: true });
-      const messageBuffer = Buffer.from(JSON.stringify(message));
+      const messageBuffer: Buffer = Buffer.from(JSON.stringify(message));
 
-      const published = this.channel.publish(
+      const published: boolean = this.channel.publish(
         exchange,
         routingKey,
         messageBuffer,
@@ -110,13 +106,14 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
         },
       );
 
-      this.logger.log(`✅ Message published to ${exchange}:${routingKey}`);
-      this.logger.debug(`Message content: ${JSON.stringify(message)}`);
       if (!published) {
         throw new Error('Failed to publish message to RabbitMQ');
       }
-    } catch (error) {
+      this.logger.log(`✅ Message published to ${exchange}:${routingKey}`);
+      this.logger.debug(`Message content: ${JSON.stringify(message)}`);
+    } catch (error: unknown) {
       this.logger.error('❌ Error publishing message to RabbitMQ:', error);
+      throw error;
     }
   }
 
@@ -135,44 +132,54 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
         durable: true,
       });
 
-      const queue = await this.channel.assertQueue(queueName, {
-        durable: true,
-        arguments: {
-          'x-message-ttl': 86400000,
-          'x-max-length': 10000,
+      const queue: amqp.Replies.AssertQueue = await this.channel.assertQueue(
+        queueName,
+        {
+          durable: true,
+          arguments: {
+            'x-message-ttl': 86400000,
+            'x-max-length': 10000,
+          },
         },
-      });
+      );
 
       await this.channel.bindQueue(queue.queue, exchange, routingKey);
 
       await this.channel.prefetch(1);
 
-      // eslint-disable-next-line @typescript-eslint/no-misused-promises
-      await this.channel.consume(queue.queue, async (msg) => {
-        if (msg) {
-          try {
-            const message: unknown = JSON.parse(msg.content.toString());
-            this.logger.log(`📨 Message received from queue: ${queueName}`);
-            this.logger.debug(`Message content: ${JSON.stringify(message)}`);
-            await callback(message);
+      await this.channel.consume(
+        queue.queue,
+        // eslint-disable-next-line @typescript-eslint/no-misused-promises
+        async (msg: amqp.ConsumeMessage | null): Promise<void> => {
+          if (msg) {
+            try {
+              const message: unknown = JSON.parse(msg.content.toString());
+              this.logger.log(`📨 Message received from queue: ${queueName}`);
+              this.logger.debug(`Message content: ${JSON.stringify(message)}`);
+              await callback(message);
 
-            this.channel.ack(msg);
+              this.channel.ack(msg);
 
-            this.logger.log(
-              `✅ Message processed succesfully from queue: ${queueName}`,
-            );
-          } catch (error) {
-            this.logger.error(`❌ Error processing message:`, error);
-            this.channel.nack(msg, false, false);
+              this.logger.log(
+                `✅ Message processed succesfully from queue: ${queueName}`,
+              );
+            } catch (error: unknown) {
+              this.logger.error(`❌ Error processing message:`, error);
+              this.channel.nack(msg, false, false);
+            }
           }
-        }
-      });
+        },
+      );
 
       this.logger.log(
         `✅ Subscribed to queue: ${queueName} with routing key: ${routingKey}`,
       );
-    } catch (error) {
+    } catch (error: unknown) {
       this.logger.error(`❌ Error subscribing to queue ${queueName}:`, error);
     }
+  }
+
+  private errorMessage(error: unknown): string {
+    return error instanceof Error ? error.message : String(error);
   }
 }

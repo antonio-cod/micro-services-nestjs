@@ -2,6 +2,7 @@ import { Body, Controller, Get, Post } from '@nestjs/common';
 import { AppService } from './app.service';
 import { PaymentQueueService } from './events/payment-queue/payment-queue.service';
 import type { PaymentOrderMessage } from './events/payment-queue.interface';
+import { PaymentMethod } from './orders/entities/order.entity';
 
 @Controller()
 export class AppController {
@@ -16,7 +17,11 @@ export class AppController {
   }
 
   @Post('test/send-message')
-  async testSendMessage(@Body() body?: Partial<PaymentOrderMessage>) {
+  async testSendMessage(@Body() body?: Partial<PaymentOrderMessage>): Promise<{
+    success: boolean;
+    message: string;
+    data: PaymentOrderMessage;
+  }> {
     const testMessage: PaymentOrderMessage = {
       orderId: body?.orderId || `test-order-${Date.now()}`,
       userId: body?.userId || 'test-user-123',
@@ -28,7 +33,7 @@ export class AppController {
           price: 99.99,
         },
       ],
-      paymentMethod: body?.paymentMethod || 'credit_card',
+      paymentMethod: body?.paymentMethod || PaymentMethod.CREDIT_CARD,
       description: body?.description || 'Mensagem de teste',
       createdAt: new Date(),
     };
