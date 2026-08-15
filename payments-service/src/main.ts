@@ -20,4 +20,4 @@ async function bootstrap() {
 
   console.log(`💳 Payments Service running on port ${port}`);
 }
-bootstrap();
+void bootstrap();

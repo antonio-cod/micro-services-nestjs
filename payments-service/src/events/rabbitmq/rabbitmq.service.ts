@@ -64,9 +64,11 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
         this.logger.log('✅ RabbitMQ connection unblocked');
       });
     } catch (error) {
+      const errorMessage =
+        error instanceof Error ? error.message : String(error);
       this.logger.warn(
         '⚠️ Failed to connect to RabbitMQ, cotinuing wihout message queue:',
-        error.message || error,
+        errorMessage,
       );
     }
   }
@@ -235,7 +237,7 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
             this.logger.log(
               `✅ Message processed succesfully from queue: ${queueName}`,
             );
-          } catch (error) {
+          } catch {
             const retryCount = this.getRetryCount(msg);
             if (retryCount < maxRetries) {
               this.logger.warn(

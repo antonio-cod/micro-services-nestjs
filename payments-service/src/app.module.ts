@@ -4,9 +4,16 @@ import { AppService } from './app.service';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { databaseConfig } from './config/database.config';
 import { EventsModule } from './events/events.module';
+import { PaymentsModule } from './payments/payments.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
-  imports: [TypeOrmModule.forRoot(databaseConfig), EventsModule],
+  imports: [
+    TypeOrmModule.forRoot(databaseConfig),
+    PaymentsModule,
+    EventsModule,
+    HealthModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })
