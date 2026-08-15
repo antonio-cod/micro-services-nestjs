@@ -7,6 +7,7 @@ import { DataSource, EntityManager } from 'typeorm';
 import { CartItem } from '../cart/entities/cart-item.entity';
 import { Cart, CartStatus } from '../cart/entities/cart.entity';
 import { PaymentQueueService } from '../events/payment-queue/payment-queue.service';
+import { PaymentResultMessage } from '../events/payment-result.interface';
 import { Order, OrderStatus, PaymentMethod } from './entities/order.entity';
 import { OrdersService } from './orders.service';
 
@@ -45,6 +46,17 @@ describe('OrdersService', () => {
     paymentMethod: PaymentMethod.PIX,
     createdAt: new Date('2026-08-15T10:05:00.000Z'),
     updatedAt: new Date('2026-08-15T10:05:00.000Z'),
+  };
+  const paymentResult: PaymentResultMessage = {
+    paymentId: '6ce0386d-d960-4099-a32b-c2ea994fea08',
+    orderId,
+    userId,
+    amount: 25.5,
+    paymentMethod: PaymentMethod.PIX,
+    status: 'approved',
+    transactionId: 'transaction-id',
+    rejectionReason: null,
+    processedAt: '2026-08-15T10:06:00.000Z',
   };
 
   let service: OrdersService;
@@ -207,6 +219,93 @@ describe('OrdersService', () => {
 
     await expect(service.findOne(userId, orderId)).rejects.toBeInstanceOf(
       NotFoundException,
+    );
+  });
+
+  it.each([
+    ['approved', OrderStatus.PAID],
+    ['rejected', OrderStatus.FAILED],
+  ] as const)(
+    'maps a %s payment to %s inside the transaction',
+    async (status, expectedStatus) => {
+      orderRepository.findOne.mockResolvedValue({ ...order });
+
+      await service.applyPaymentResult({ ...paymentResult, status });
+
+      expect(orderRepository.findOne).toHaveBeenCalledWith({
+        where: { id: orderId },
+        lock: { mode: 'pessimistic_write' },
+      });
+      expect(orderRepository.save).toHaveBeenCalledWith(
+        expect.objectContaining({ status: expectedStatus }),
+      );
+    },
+  );
+
+  it.each([
+    [OrderStatus.PAID, 'approved'],
+    [OrderStatus.FAILED, 'rejected'],
+  ] as const)(
+    'accepts an idempotent %s result',
+    async (orderStatus, status) => {
+      orderRepository.findOne.mockResolvedValue({
+        ...order,
+        status: orderStatus,
+      });
+
+      await service.applyPaymentResult({ ...paymentResult, status });
+
+      expect(orderRepository.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [OrderStatus.PAID, 'rejected'],
+    [OrderStatus.FAILED, 'approved'],
+    [OrderStatus.CANCELLED, 'approved'],
+  ] as const)(
+    'rejects a conflicting result for a %s order',
+    async (orderStatus, status) => {
+      orderRepository.findOne.mockResolvedValue({
+        ...order,
+        status: orderStatus,
+      });
+
+      await expect(
+        service.applyPaymentResult({ ...paymentResult, status }),
+      ).rejects.toThrow('conflicts with terminal order status');
+      expect(orderRepository.save).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    { userId: 'another-user' },
+    { amount: 25.51 },
+    { paymentMethod: PaymentMethod.BOLETO },
+  ])('rejects divergent payment data %p', async (change) => {
+    orderRepository.findOne.mockResolvedValue({ ...order });
+
+    await expect(
+      service.applyPaymentResult({ ...paymentResult, ...change }),
+    ).rejects.toThrow('does not match order');
+    expect(orderRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects a result for an unknown order', async () => {
+    orderRepository.findOne.mockResolvedValue(null);
+
+    await expect(service.applyPaymentResult(paymentResult)).rejects.toThrow(
+      'Order not found',
+    );
+    expect(orderRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('propagates persistence failures', async () => {
+    orderRepository.findOne.mockResolvedValue({ ...order });
+    orderRepository.save.mockRejectedValue(new Error('database failure'));
+
+    await expect(service.applyPaymentResult(paymentResult)).rejects.toThrow(
+      'database failure',
     );
   });
 });

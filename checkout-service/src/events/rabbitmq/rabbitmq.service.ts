@@ -7,6 +7,11 @@ import {
 import * as amqp from 'amqplib';
 import { ConfigService } from '@nestjs/config';
 
+export interface QueueSubscriptionOptions {
+  maxRetries?: number;
+  retryDelayMs?: number;
+}
+
 @Injectable()
 export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(RabbitmqService.name);
@@ -122,7 +127,11 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
     exchange: string,
     routingKey: string,
     callback: (message: unknown) => Promise<void>,
+    options: QueueSubscriptionOptions = {},
   ): Promise<void> {
+    const maxRetries: number = options.maxRetries ?? 3;
+    const retryDelayMs: number = options.retryDelayMs ?? 30000;
+
     try {
       if (!this.channel) {
         throw new Error('RabbitMQ channel not available');
@@ -132,6 +141,40 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
         durable: true,
       });
 
+      const retryExchange = `${exchange}.retry.dlx`;
+      const deadLetterExchange = `${exchange}.dlx`;
+      await this.channel.assertExchange(retryExchange, 'topic', {
+        durable: true,
+      });
+      await this.channel.assertExchange(deadLetterExchange, 'topic', {
+        durable: true,
+      });
+
+      const retryQueueName = `${queueName}.retry`;
+      const retryRoutingKey = `${routingKey}.retry`;
+      await this.channel.assertQueue(retryQueueName, {
+        durable: true,
+        arguments: {
+          'x-message-ttl': retryDelayMs,
+          'x-dead-letter-exchange': exchange,
+          'x-dead-letter-routing-key': routingKey,
+        },
+      });
+      await this.channel.bindQueue(
+        retryQueueName,
+        retryExchange,
+        retryRoutingKey,
+      );
+
+      const deadLetterQueueName = `${queueName}.dlq`;
+      const deadLetterRoutingKey = `${routingKey}.dlq`;
+      await this.channel.assertQueue(deadLetterQueueName, { durable: true });
+      await this.channel.bindQueue(
+        deadLetterQueueName,
+        deadLetterExchange,
+        deadLetterRoutingKey,
+      );
+
       const queue: amqp.Replies.AssertQueue = await this.channel.assertQueue(
         queueName,
         {
@@ -139,6 +182,8 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
           arguments: {
             'x-message-ttl': 86400000,
             'x-max-length': 10000,
+            'x-dead-letter-exchange': retryExchange,
+            'x-dead-letter-routing-key': retryRoutingKey,
           },
         },
       );
@@ -165,7 +210,27 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
               );
             } catch (error: unknown) {
               this.logger.error(`❌ Error processing message:`, error);
-              this.channel.nack(msg, false, false);
+              const retryCount: number = this.getRetryCount(msg);
+              if (retryCount < maxRetries) {
+                this.channel.nack(msg, false, false);
+                return;
+              }
+
+              const publishedToDlq: boolean = this.channel.publish(
+                deadLetterExchange,
+                deadLetterRoutingKey,
+                msg.content,
+                {
+                  persistent: true,
+                  headers: msg.properties.headers,
+                },
+              );
+
+              if (publishedToDlq) {
+                this.channel.ack(msg);
+              } else {
+                this.channel.nack(msg, false, false);
+              }
             }
           }
         },
@@ -177,6 +242,32 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
     } catch (error: unknown) {
       this.logger.error(`❌ Error subscribing to queue ${queueName}:`, error);
     }
+  }
+
+  private getRetryCount(message: amqp.ConsumeMessage): number {
+    const deaths: unknown = message.properties.headers?.['x-death'];
+    if (!Array.isArray(deaths)) return 0;
+
+    let total = 0;
+    for (const death of deaths as unknown[]) {
+      if (!this.isDeathHeader(death) || death.queue.endsWith('.retry')) {
+        continue;
+      }
+      total += death.count;
+    }
+    return total;
+  }
+
+  private isDeathHeader(
+    input: unknown,
+  ): input is { count: number; queue: string } {
+    if (typeof input !== 'object' || input === null) return false;
+    const value: Record<string, unknown> = input as Record<string, unknown>;
+    return (
+      typeof value.count === 'number' &&
+      Number.isFinite(value.count) &&
+      typeof value.queue === 'string'
+    );
   }
 
   private errorMessage(error: unknown): string {

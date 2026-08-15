@@ -10,6 +10,7 @@ import { Cart, CartStatus } from '../cart/entities/cart.entity';
 import { toCents } from '../cart/money';
 import { PaymentQueueService } from '../events/payment-queue/payment-queue.service';
 import type { PaymentOrderMessage } from '../events/payment-queue.interface';
+import type { PaymentResultMessage } from '../events/payment-result.interface';
 import { CheckoutDto } from './dto/checkout.dto';
 import { Order, OrderStatus } from './entities/order.entity';
 import { OrderResponse, toOrderResponse } from './order-response';
@@ -66,6 +67,40 @@ export class OrdersService {
     return toOrderResponse(order);
   }
 
+  async applyPaymentResult(message: PaymentResultMessage): Promise<void> {
+    await this.dataSource.transaction(
+      async (manager: EntityManager): Promise<void> => {
+        const repository: Repository<Order> = manager.getRepository(Order);
+        const order: Order | null = await repository.findOne({
+          where: { id: message.orderId },
+          lock: { mode: 'pessimistic_write' },
+        });
+
+        if (!order) {
+          throw new Error('Order not found for payment result');
+        }
+
+        this.validatePaymentResult(order, message);
+
+        const expectedStatus: OrderStatus =
+          message.status === 'approved' ? OrderStatus.PAID : OrderStatus.FAILED;
+
+        if (order.status === expectedStatus) {
+          return;
+        }
+
+        if (order.status !== OrderStatus.PENDING) {
+          throw new Error(
+            'Payment result conflicts with terminal order status',
+          );
+        }
+
+        order.status = expectedStatus;
+        await repository.save(order);
+      },
+    );
+  }
+
   private async completeCheckout(
     manager: EntityManager,
     userId: string,
@@ -114,6 +149,26 @@ export class OrdersService {
       }
     } catch {
       throw new UnprocessableEntityException('Total do carrinho inválido');
+    }
+  }
+
+  private validatePaymentResult(
+    order: Order,
+    message: PaymentResultMessage,
+  ): void {
+    let sameAmount: boolean;
+    try {
+      sameAmount = toCents(order.total) === toCents(message.amount);
+    } catch {
+      sameAmount = false;
+    }
+
+    if (
+      order.userId !== message.userId ||
+      !sameAmount ||
+      String(order.paymentMethod) !== message.paymentMethod
+    ) {
+      throw new Error('Payment result does not match order');
     }
   }
 

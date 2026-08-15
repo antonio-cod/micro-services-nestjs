@@ -2,9 +2,10 @@
 
 **Serviço:** checkout-service  
 **Porta:** 3003  
-**Escopo:** finalização do carrinho, criação e consulta de pedidos e publicação da solicitação de pagamento  
+**Escopo:** finalização do carrinho, criação e consulta de pedidos, solicitação de pagamento e consumo do resultado
 **Status:** Pendente  
 **Criado em:** 2026-08-15
+**Atualizado em:** 2026-08-15
 
 ---
 
@@ -12,9 +13,9 @@
 
 Implementar a finalização do carrinho no `checkout-service`, transformando o carrinho ativo de um usuário autenticado em um pedido pendente e enviando ao `payments-service`, por meio do RabbitMQ, os dados necessários para o processamento assíncrono do pagamento.
 
-Também devem ser disponibilizadas consultas para listar os pedidos do usuário autenticado e visualizar um pedido específico de sua propriedade.
+Também devem ser disponibilizadas consultas para listar os pedidos do usuário autenticado e visualizar um pedido específico de sua propriedade. Após o processamento, o checkout deve consumir o resultado publicado pelo `payments-service` e atualizar o estado do pedido.
 
-Esta entrega encerra a responsabilidade do `checkout-service` após a criação do pedido e a publicação da solicitação de pagamento. O processamento do pagamento permanece exclusivamente sob responsabilidade do `payments-service`.
+O processamento e a decisão financeira permanecem exclusivamente sob responsabilidade do `payments-service`. O `checkout-service` é responsável por refletir no pedido o resultado assíncrono recebido, sem realizar ou simular a cobrança.
 
 ---
 
@@ -28,6 +29,8 @@ Esta entrega encerra a responsabilidade do `checkout-service` após a criação 
 - A entidade `Order` admite os status `pending`, `paid`, `failed` e `cancelled`; todo pedido desta entrega deve ser criado com status `pending`.
 - O `PaymentQueueService` já disponibiliza `publishPaymentOrder` e publica no exchange `payments` com a routing key `payment.order`.
 - O `payments-service` consome as mensagens por meio da queue `payment_queue` e realiza o processamento de forma assíncrona.
+- Após persistir o pagamento final, o `payments-service` publica `PaymentResultMessage` no exchange `payments` com a routing key `payment.result`.
+- A entidade `Order` deve mapear pagamento `approved` para `paid` e pagamento `rejected` para `failed`.
 - Valores monetários expostos pela API ou enviados na mensagem devem ser representados como números válidos.
 - Todas as funções, variáveis e parâmetros adicionados ou alterados por esta entrega devem possuir tipagem explícita e adequada. Não devem ser introduzidos usos implícitos ou explícitos de `any` para contornar a definição dos contratos.
 
@@ -175,6 +178,51 @@ Além do registro da entidade `Order` no contexto de persistência, o módulo de
 
 O módulo deve disponibilizar os componentes necessários aos endpoints de pedidos e à operação de checkout, preservando os limites de responsabilidade dos módulos existentes.
 
+### RF-09: Contrato do resultado do pagamento
+
+O checkout deve receber o seguinte contrato, definido pelo produtor `payments-service`:
+
+```ts
+interface PaymentResultMessage {
+  paymentId: string;
+  orderId: string;
+  userId: string;
+  amount: number;
+  paymentMethod: string;
+  status: 'approved' | 'rejected';
+  transactionId: string | null;
+  rejectionReason: string | null;
+  processedAt: string;
+}
+```
+
+Todos os campos são obrigatórios. Os campos anuláveis devem estar presentes como `null` quando não forem aplicáveis, `processedAt` deve ser uma data ISO 8601 válida e o status deve ser exclusivamente `approved` ou `rejected`.
+
+### RF-10: Consumer do resultado
+
+O `EventsModule` deve declarar um consumer para a fila durável `payment_result_queue`, vinculada ao exchange tópico `payments` pela routing key `payment.result`.
+
+A topologia de retorno deve incluir:
+
+- fila principal `payment_result_queue`;
+- fila de retry `payment_result_queue.retry`;
+- dead-letter queue `payment_result_queue.dlq`;
+- tentativas limitadas e ACK somente depois do processamento bem-sucedido.
+
+Ao receber uma mensagem, o consumer deve validar o contrato e encaminhá-lo a uma operação de domínio responsável por atualizar o pedido. Falhas de validação ou processamento devem ser propagadas para retry e, depois do limite, DLQ.
+
+### RF-11: Atualizar o status do pedido
+
+A atualização deve ser transacional e seguir esta sequência:
+
+1. Localizar o pedido pelo `orderId` recebido.
+2. Confirmar que `userId`, `amount` e `paymentMethod` correspondem exatamente ao pedido persistido.
+3. Alterar o pedido de `pending` para `paid` quando `status` for `approved`.
+4. Alterar o pedido de `pending` para `failed` quando `status` for `rejected`.
+5. Persistir o novo estado antes de permitir o ACK da mensagem.
+
+Pedido inexistente ou divergência de usuário, valor ou método não deve criar nem modificar pedido e deve provocar retry/DLQ. O checkout não deve persistir dados financeiros do pagamento além do status correspondente do pedido.
+
 ---
 
 ## 7. Regras de negócio e consistência
@@ -201,7 +249,13 @@ Todas as funções, variáveis e parâmetros criados ou modificados para esta fu
 
 ### RN-06: Limite do processamento assíncrono
 
-O checkout deve apenas registrar o pedido pendente e publicar a solicitação. A confirmação, recusa, retentativa ou qualquer outra decisão de pagamento não integra o fluxo síncrono destes endpoints.
+O fluxo síncrono deve apenas registrar o pedido pendente e publicar a solicitação. A confirmação ou recusa não integra a resposta de `POST /cart/checkout`; ela é aplicada posteriormente pelo consumer do resultado.
+
+### RN-07: Idempotência e estados terminais
+
+Receber novamente o mesmo resultado para um pedido que já esteja no estado correspondente deve ser tratado como sucesso, sem nova alteração. Um resultado conflitante para pedido já terminal (`paid`, `failed` ou `cancelled`) não pode sobrescrever o estado e deve seguir retry/DLQ.
+
+Somente pedidos `pending` podem transicionar em razão de `PaymentResultMessage`. Nenhuma mensagem de pagamento pode retirar um pedido de um estado terminal.
 
 ---
 
@@ -281,6 +335,25 @@ O checkout deve apenas registrar o pedido pendente e publicar a solicitação. A
 - [ ] O projeto compila sem erros de tipagem.
 - [ ] Os testes existentes de carrinho, autenticação, entidades, health check e mensageria continuam passando.
 
+### CA-07: Consumo do resultado do pagamento
+
+- [ ] O checkout declara e consome `payment_result_queue` por meio de `payments:payment.result`.
+- [ ] O consumer valida todos os campos de `PaymentResultMessage` e aceita somente `approved` ou `rejected`.
+- [ ] O resultado é encaminhado à operação de domínio com tipagem explícita.
+- [ ] A mensagem só recebe ACK depois da persistência bem-sucedida.
+- [ ] Falhas de validação ou processamento seguem retry e chegam à `payment_result_queue.dlq` após o limite.
+
+### CA-08: Atualização e idempotência do pedido
+
+- [ ] `approved` altera um pedido `pending` para `paid`.
+- [ ] `rejected` altera um pedido `pending` para `failed`.
+- [ ] `orderId`, `userId`, `amount` e `paymentMethod` são validados contra o pedido persistido.
+- [ ] Pedido inexistente ou payload divergente não altera dados.
+- [ ] Repetir um resultado equivalente para um pedido já atualizado é um sucesso idempotente.
+- [ ] Resultado conflitante não sobrescreve pedido terminal e segue retry/DLQ.
+- [ ] `GET /orders/:id` passa a refletir o estado atualizado pelo consumer.
+- [ ] Testes cobrem aprovação, rejeição, duplicata, conflito, divergência, pedido inexistente e falha de persistência.
+
 ---
 
 ## 10. Fora de escopo
@@ -290,7 +363,7 @@ O checkout deve apenas registrar o pedido pendente e publicar a solicitação. A
 - Implementar cancelamento de pedido.
 - Implementar verificação, reserva ou baixa de estoque.
 - Reprecificar produtos durante o checkout.
-- Implementar atualização manual do status do pedido por estes endpoints.
+- Implementar atualização manual do status do pedido por endpoints; a atualização ocorre exclusivamente pelo consumer.
 - Implementar cupons, descontos, frete, impostos ou parcelamento.
-- Alterar exchanges, routing keys, queues ou o contrato de mensageria existentes além do preenchimento do `PaymentOrderMessage`.
+- Alterar a topologia existente de solicitação `payment.order`; esta entrega adiciona somente o consumo de `payment.result` e suas filas.
 - Alterar o `payments-service`, o `products-service` ou o `users-service`.

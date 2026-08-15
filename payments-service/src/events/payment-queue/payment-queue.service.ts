@@ -1,5 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
+import { PaymentOrderMessage } from '../payment-queue.interface';
 
 @Injectable()
 export class PaymentQueueService {
@@ -12,7 +13,7 @@ export class PaymentQueueService {
   constructor(private readonly rabbitMQService: RabbitmqService) {}
 
   async consumePaymentOrders(
-    callback: (message: any) => Promise<void>,
+    callback: (message: PaymentOrderMessage) => Promise<void>,
   ): Promise<void> {
     this.logger.log('📡 Setting up payment orders consumer...');
 
@@ -20,7 +21,7 @@ export class PaymentQueueService {
       this.QUEUE_NAME,
       this.EXCHANGE,
       this.ROUTING_KEY,
-      callback,
+      (message: unknown) => callback(message as PaymentOrderMessage),
     );
 
     this.logger.log('✅ Payment orders consumer is ready');

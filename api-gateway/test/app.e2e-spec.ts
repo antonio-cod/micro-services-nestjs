@@ -27,6 +27,10 @@ describe('users-service integration through the gateway (e2e)', () => {
     email: user.email,
     role: user.role,
   });
+  const expiredToken = new JwtService({ secret: jwtSecret }).sign(
+    { sub: user.id, email: user.email, role: user.role },
+    { expiresIn: -1 },
+  );
 
   beforeAll(async () => {
     httpService = {
@@ -45,6 +49,12 @@ describe('users-service integration through the gateway (e2e)', () => {
         }
         if (config.url.includes('/users/profile')) {
           return of({ data: user, status: 200 } as AxiosResponse);
+        }
+        if (config.url.includes('/payments/')) {
+          return of({
+            data: { orderId: 'order-id', status: 'approved' },
+            status: 200,
+          } as AxiosResponse);
         }
         return of({ data: [{ ...user, role: 'seller' }], status: 200 });
       }),
@@ -115,6 +125,40 @@ describe('users-service integration through the gateway (e2e)', () => {
 
   it('rejects protected routes without a token', async () => {
     await request(app.getHttpServer()).get('/users/profile').expect(401);
+  });
+
+  it('authenticates payment queries before forwarding them', async () => {
+    const paymentPath = '/payments/order-id';
+    const callsBefore = httpService.request.mock.calls.length;
+
+    await request(app.getHttpServer()).get(paymentPath).expect(401);
+    await request(app.getHttpServer())
+      .get(paymentPath)
+      .set('Authorization', 'Bearer invalid.jwt')
+      .expect(401);
+    await request(app.getHttpServer())
+      .get(paymentPath)
+      .set('Authorization', `Bearer ${expiredToken}`)
+      .expect(401);
+    expect(httpService.request).toHaveBeenCalledTimes(callsBefore);
+
+    await request(app.getHttpServer())
+      .get(paymentPath)
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200)
+      .expect({ orderId: 'order-id', status: 'approved' });
+
+    expect(httpService.request.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: 'get',
+      url: 'http://localhost:3004/payments/order-id',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'x-user-id': user.id,
+        'x-user-email': user.email,
+        'x-user-role': user.role,
+      },
+      timeout: 10000,
+    });
   });
 
   afterAll(async () => {

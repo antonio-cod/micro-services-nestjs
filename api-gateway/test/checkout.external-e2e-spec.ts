@@ -1,122 +1,262 @@
 import request from 'supertest';
 
 const gatewayUrl = process.env.GATEWAY_URL ?? 'http://localhost:3005';
+const paymentTimeoutMs = Number(process.env.PAYMENT_TIMEOUT_MS ?? 15000);
+const paymentPollIntervalMs = Number(
+  process.env.PAYMENT_POLL_INTERVAL_MS ?? 250,
+);
+
+jest.setTimeout(paymentTimeoutMs * 2);
 
 interface AuthResponse {
   token: string;
   user: { id: string };
 }
 
-describe('checkout-service integration through the running gateway (e2e)', () => {
+interface ProductResponse {
+  id: string;
+  price: number;
+  isActive: boolean;
+}
+
+interface OrderResponse {
+  id: string;
+  cartId: string;
+  paymentMethod: string;
+  total: number;
+  userId: string;
+}
+
+interface PaymentResponse {
+  orderId: string;
+  userId: string;
+  amount: number;
+  paymentMethod: string;
+  status: string;
+}
+
+describe('marketplace integration through the running gateway (e2e)', () => {
   const gateway = request(gatewayUrl);
   const runId = `${Date.now()}-${process.pid}`;
   const password = 'secret123';
 
-  it('executes the complete purchase flow only through the gateway', async () => {
-    const sellerEmail = `seller-${runId}@example.com`;
-    const buyerEmail = `buyer-${runId}@example.com`;
+  it('processes approved and rejected purchases only through the gateway', async () => {
+    const seller = await registerAndLogin('seller');
+    const approvedProduct = await createProduct(
+      seller.token,
+      `Approved product ${runId}`,
+      49.9,
+    );
+    const rejectedProduct = await createProduct(
+      seller.token,
+      `Rejected product ${runId}`,
+      19.99,
+    );
 
-    await gateway
-      .post('/auth/register')
-      .send({
-        email: sellerEmail,
-        password,
-        firstName: 'Seller',
-        lastName: runId,
-        role: 'seller',
-      })
-      .expect(201);
-
-    const sellerLogin = await gateway
-      .post('/auth/login')
-      .send({ email: sellerEmail, password })
-      .expect(200);
-    const seller = sellerLogin.body as AuthResponse;
-
-    const productResponse = await gateway
-      .post('/products')
-      .set('Authorization', `Bearer ${seller.token}`)
-      .send({
-        name: `Integration product ${runId}`,
-        description: 'Product created by the checkout gateway E2E test',
-        price: 49.9,
-        stock: 3,
-      })
-      .expect(201);
-    const productId = productResponse.body.id as string;
-
-    await gateway
-      .post('/auth/register')
-      .send({
-        email: buyerEmail,
-        password,
-        firstName: 'Buyer',
-        lastName: runId,
-        role: 'buyer',
-      })
-      .expect(201);
-
-    const buyerLogin = await gateway
-      .post('/auth/login')
-      .send({ email: buyerEmail, password })
-      .expect(200);
-    const buyer = buyerLogin.body as AuthResponse;
-    const authorization = `Bearer ${buyer.token}`;
-
-    const addedCart = await gateway
-      .post('/cart/items')
-      .set('Authorization', authorization)
-      .send({ productId, quantity: 1 })
-      .expect(200);
-    expect(addedCart.body.items).toEqual(
+    const catalog = await gateway.get('/products').expect(200);
+    expect(catalog.body).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ productId, quantity: 1 }),
+        expect.objectContaining({ id: approvedProduct.id, isActive: true }),
+        expect.objectContaining({ id: rejectedProduct.id, isActive: true }),
       ]),
     );
 
-    const cartResponse = await gateway
+    const buyer = await registerAndLogin('buyer');
+    const authorization = `Bearer ${buyer.token}`;
+
+    const approvedOrder = await purchase(
+      authorization,
+      buyer.user.id,
+      approvedProduct,
+    );
+    const approvedPayment = await waitForPayment(
+      authorization,
+      approvedOrder.id,
+      'approved',
+    );
+    expectPayment(
+      approvedPayment,
+      approvedOrder,
+      buyer.user.id,
+      approvedProduct.price,
+      'approved',
+    );
+
+    const emptyCart = await gateway
       .get('/cart')
       .set('Authorization', authorization)
       .expect(200);
-    expect(cartResponse.body.items).toEqual(
-      expect.arrayContaining([expect.objectContaining({ productId })]),
-    );
+    expect(emptyCart.body).toMatchObject({ id: null, total: 0, items: [] });
 
-    const orderResponse = await gateway
+    const rejectedOrder = await purchase(
+      authorization,
+      buyer.user.id,
+      rejectedProduct,
+    );
+    expect(rejectedOrder.id).not.toBe(approvedOrder.id);
+    expect(rejectedOrder.cartId).not.toBe(approvedOrder.cartId);
+
+    const rejectedPayment = await waitForPayment(
+      authorization,
+      rejectedOrder.id,
+      'rejected',
+    );
+    expectPayment(
+      rejectedPayment,
+      rejectedOrder,
+      buyer.user.id,
+      rejectedProduct.price,
+      'rejected',
+    );
+  });
+
+  it('rejects checkout and payment routes without a token', async () => {
+    await gateway.get('/cart').expect(401);
+    await gateway
+      .get('/payments/00000000-0000-4000-8000-000000000000')
+      .expect(401);
+  });
+
+  async function registerAndLogin(role: 'seller' | 'buyer') {
+    const email = `${role}-${runId}@example.com`;
+    await gateway
+      .post('/auth/register')
+      .send({
+        email,
+        password,
+        firstName: role === 'seller' ? 'Seller' : 'Buyer',
+        lastName: runId,
+        role,
+      })
+      .expect(201);
+
+    const login = await gateway
+      .post('/auth/login')
+      .send({ email, password })
+      .expect(200);
+    return login.body as AuthResponse;
+  }
+
+  async function createProduct(token: string, name: string, price: number) {
+    const response = await gateway
+      .post('/products')
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        name,
+        description: 'Product created by the marketplace gateway E2E test',
+        price,
+        stock: 3,
+      })
+      .expect(201);
+    return {
+      ...(response.body as ProductResponse),
+      price: Number(response.body.price),
+    };
+  }
+
+  async function purchase(
+    authorization: string,
+    buyerId: string,
+    product: ProductResponse,
+  ): Promise<OrderResponse> {
+    await gateway
+      .post('/cart/items')
+      .set('Authorization', authorization)
+      .send({ productId: product.id, quantity: 1 })
+      .expect(200);
+
+    const cart = await gateway
+      .get('/cart')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(cart.body).toMatchObject({
+      userId: buyerId,
+      total: product.price,
+      items: [
+        expect.objectContaining({
+          productId: product.id,
+          price: product.price,
+          quantity: 1,
+          subtotal: product.price,
+        }),
+      ],
+    });
+
+    const checkout = await gateway
       .post('/cart/checkout')
       .set('Authorization', authorization)
       .send({ paymentMethod: 'pix' })
       .expect(201);
-    const order = orderResponse.body as {
-      id: string;
-      cartId: string;
-      paymentMethod: string;
-      userId: string;
-    };
+    const order = checkout.body as OrderResponse;
     expect(order).toMatchObject({
-      cartId: cartResponse.body.id,
+      cartId: cart.body.id,
       paymentMethod: 'pix',
-      userId: buyer.user.id,
+      total: product.price,
+      userId: buyerId,
     });
-
-    const ordersResponse = await gateway
-      .get('/orders')
-      .set('Authorization', authorization)
-      .expect(200);
-    expect(ordersResponse.body).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: order.id })]),
-    );
 
     await gateway
       .get(`/orders/${order.id}`)
       .set('Authorization', authorization)
       .expect(200)
-      .expect(({ body }) => {
-        expect(body).toMatchObject(order);
-      });
-  });
+      .expect(({ body }) => expect(body).toMatchObject(order));
 
-  it('rejects checkout routes without a token', async () => {
-    await gateway.get('/cart').expect(401);
-  });
+    return order;
+  }
+
+  async function waitForPayment(
+    authorization: string,
+    orderId: string,
+    expectedStatus: 'approved' | 'rejected',
+  ): Promise<PaymentResponse> {
+    const deadline = Date.now() + paymentTimeoutMs;
+    let lastResult = 'no response';
+
+    while (Date.now() < deadline) {
+      const response = await gateway
+        .get(`/payments/${orderId}`)
+        .set('Authorization', authorization);
+      lastResult = `${response.status}: ${JSON.stringify(response.body)}`;
+
+      if (response.status === 404 || response.body.status === 'pending') {
+        await delay(paymentPollIntervalMs);
+        continue;
+      }
+      if (response.status !== 200) {
+        throw new Error(
+          `Unexpected payment response for order ${orderId}: ${lastResult}`,
+        );
+      }
+      if (response.body.status !== expectedStatus) {
+        throw new Error(
+          `Unexpected terminal payment status for order ${orderId}: ${lastResult}`,
+        );
+      }
+      return response.body as PaymentResponse;
+    }
+
+    throw new Error(
+      `Timed out waiting for ${expectedStatus} payment for order ${orderId}; last result: ${lastResult}`,
+    );
+  }
+
+  function expectPayment(
+    payment: PaymentResponse,
+    order: OrderResponse,
+    buyerId: string,
+    amount: number,
+    status: 'approved' | 'rejected',
+  ) {
+    expect(payment).toMatchObject({
+      orderId: order.id,
+      userId: buyerId,
+      amount,
+      paymentMethod: 'pix',
+      status,
+    });
+  }
+
+  function delay(milliseconds: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
 });

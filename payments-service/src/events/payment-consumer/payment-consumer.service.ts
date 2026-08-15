@@ -3,6 +3,7 @@ import { PaymentQueueService } from '../payment-queue/payment-queue.service';
 import { PaymentOrderMessage } from '../payment-queue.interface';
 import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
 import { PaymentsService } from '../../payments/payments.service';
+import { PaymentResultPublisherService } from '../payment-result/payment-result-publisher.service';
 
 export interface ConsumerMetrics {
   totalProcessed: number; // Total de mensagens processadas
@@ -46,6 +47,7 @@ export class PaymentConsumerService implements OnModuleInit {
     private readonly paymentQueueService: PaymentQueueService,
     private readonly rabbitMQService: RabbitmqService,
     private readonly paymentsService: PaymentsService,
+    private readonly paymentResultPublisher: PaymentResultPublisherService,
   ) {}
 
   async onModuleInit() {
@@ -100,7 +102,8 @@ export class PaymentConsumerService implements OnModuleInit {
         throw new Error('Invalid payment message received');
       }
 
-      await this.paymentsService.processPayment(message);
+      const payment = await this.paymentsService.processPayment(message);
+      await this.paymentResultPublisher.publish(payment);
       this.logger.log('✅ Payment order processed successfully');
       this.updateMetrics(true, startTime);
     } catch (error) {

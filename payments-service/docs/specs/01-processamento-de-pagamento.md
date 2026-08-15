@@ -1,19 +1,20 @@
 # SPEC: Processamento de pagamento
 
 **Projeto:** marketplace-ms  
-**Serviço afetado:** payments-service  
+**Serviço afetado:** payments-service
 **Porta do serviço:** 3004  
-**Escopo:** processamento assíncrono e consulta de pagamentos  
+**Escopo:** processamento assíncrono, consulta de pagamentos e publicação do resultado
 **Status:** Pendente  
 **Criado em:** 2026-08-15
+**Atualizado em:** 2026-08-15
 
 ---
 
 ## 1. Objetivo
 
-Implementar o processamento de pagamentos recebidos pelo `payments-service` por meio da fila `payment_queue`, persistindo o resultado no PostgreSQL e disponibilizando uma consulta HTTP pelo identificador do pedido.
+Implementar o processamento de pagamentos recebidos pelo `payments-service` por meio da fila `payment_queue`, persistindo o resultado no PostgreSQL, disponibilizando uma consulta HTTP pelo identificador do pedido e publicando o resultado final no RabbitMQ para atualização assíncrona do pedido pelo `checkout-service`.
 
-O processamento deve utilizar exclusivamente um gateway simulado e determinístico. A integração existente com RabbitMQ, incluindo retry e DLQ, bem como os endpoints atuais de DLQ e métricas, deve permanecer disponível e sem alteração de contrato.
+O processamento deve utilizar exclusivamente um gateway simulado e determinístico. A mensagem de origem só deve ser confirmada após a persistência do pagamento e a publicação do resultado. A integração existente com RabbitMQ, incluindo retry e DLQ, bem como os endpoints atuais de DLQ e métricas, deve permanecer disponível.
 
 ## 2. Contexto atual
 
@@ -23,6 +24,7 @@ O processamento deve utilizar exclusivamente um gateway simulado e determinísti
 - O consumer recebe mensagens da fila `payment_queue` e já valida o contrato `PaymentOrderMessage`, composto por `orderId`, `userId`, `amount`, `items` e `paymentMethod`.
 - O processamento posterior à validação ainda não existe: atualmente a mensagem é apenas registrada em log.
 - Retry, DLQ e os endpoints de DLQ e métricas já estão configurados.
+- O exchange tópico existente se chama `payments`, e a solicitação de pagamento utiliza a routing key `payment.order`.
 - Existe um health check do consumer em `GET /metrics/health`; ele não substitui o health check geral solicitado nesta SPEC.
 
 ## 3. Entidade Payment
@@ -117,12 +119,43 @@ O serviço deve disponibilizar `GET /health` como health check geral do `payment
 
 Quando a aplicação estiver operacional, a rota deve responder com status HTTP `200` e um corpo que indique explicitamente estado saudável. Essa rota deve coexistir com `GET /metrics/health`, sem substituir ou alterar o endpoint atual.
 
+### RF-08: Publicar o resultado do pagamento
+
+Após `PaymentsService.processPayment()` persistir o pagamento em estado final, o `payments-service` deve publicar uma mensagem no exchange durável `payments`, do tipo `topic`, usando a routing key `payment.result`.
+
+A mensagem deve seguir o contrato `PaymentResultMessage`:
+
+```ts
+interface PaymentResultMessage {
+  paymentId: string;
+  orderId: string;
+  userId: string;
+  amount: number;
+  paymentMethod: string;
+  status: 'approved' | 'rejected';
+  transactionId: string | null;
+  rejectionReason: string | null;
+  processedAt: string;
+}
+```
+
+Todos os campos são obrigatórios; `transactionId` e `rejectionReason` devem ser enviados explicitamente como `null` quando não forem aplicáveis. `processedAt` deve ser serializado em ISO 8601 UTC, e todos os valores devem refletir exatamente o registro final persistido.
+
+O resultado nunca deve ser publicado com status `pending` nem antes da persistência do estado final. Se a publicação falhar, o erro deve ser propagado ao consumer de `payment_queue`, impedindo o ACK e acionando o retry/DLQ já existente.
+
+### RF-09: Garantir idempotência na publicação
+
+O processamento deve continuar garantindo um único pagamento por `orderId`. Quando um retry encontrar um pagamento já finalizado, não deve executar novamente o gateway simulado, mas deve republicar o mesmo `PaymentResultMessage`. Dessa forma, uma falha ocorrida depois da persistência e antes da publicação pode ser recuperada sem duplicar a cobrança.
+
+A mensagem consumida de `payment_queue` somente deve ser contabilizada como sucesso e receber ACK depois que o resultado final for persistido e publicado com sucesso.
+
 ## 5. Requisitos de qualidade e testes
 
 - As regras do fake gateway devem possuir cobertura automatizada para aprovação e para cada motivo de rejeição, incluindo os valores de fronteira.
 - O processamento deve possuir cobertura para a transição de `pending` ao estado final e para a persistência dos campos correspondentes.
 - A consulta deve possuir cobertura para pagamento existente e inexistente.
 - O consumer deve possuir cobertura que comprove a chamada ao processamento após uma mensagem válida e a propagação de falhas técnicas.
+- A publicação deve possuir cobertura do contrato, exchange, routing key, ordem entre persistência e publicação, retry e republicação idempotente.
 - O health check geral deve possuir cobertura de seu contrato HTTP.
 - Os testes existentes de RabbitMQ, retry, DLQ e métricas devem continuar passando.
 
@@ -175,12 +208,21 @@ Quando a aplicação estiver operacional, a rota deve responder com status HTTP 
 - [ ] O serviço continua executando na porta `3004` e utilizando o PostgreSQL configurado na porta `5435`.
 - [ ] Build, lint e testes do `payments-service` passam sem regressões.
 
+### CA-07: Retorno assíncrono
+
+- [ ] Um pagamento `approved` persistido publica `PaymentResultMessage` em `payments:payment.result`.
+- [ ] Um pagamento `rejected` persistido publica a mesma estrutura, incluindo o motivo da rejeição.
+- [ ] Nenhum resultado `pending` ou ainda não persistido é publicado.
+- [ ] Falha de publicação impede o ACK da solicitação e aciona retry sem executar novamente uma cobrança já finalizada.
+- [ ] O payload publicado corresponde ao pagamento persistido.
+
 ## 7. Fora de escopo
 
 - Integrar Stripe ou qualquer outro gateway de pagamento real.
-- Criar webhook ou outro mecanismo para notificar o `checkout-service` sobre o resultado.
+- Criar webhook ou notificação HTTP síncrona para o `checkout-service`.
+- Implementar o consumer do resultado ou atualizar o status do pedido no `checkout-service`; essa responsabilidade pertence à SPEC de finalização do pedido.
 - Alterar o contrato publicado pelo `checkout-service` ou o contrato validado de `PaymentOrderMessage`.
-- Alterar filas, exchanges, regras de retry ou DLQ já configuradas.
+- Alterar o contrato ou a topologia existentes de `payment.order`, `payment_queue` e sua retry/DLQ.
 - Alterar, remover ou renomear endpoints existentes de DLQ e métricas.
 - Expor a consulta de pagamentos por meio do `api-gateway`.
 - Implementar estorno, cancelamento, captura posterior ou reprocessamento manual de pagamentos.
