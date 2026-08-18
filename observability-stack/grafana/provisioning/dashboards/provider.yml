@@ -1,0 +1,15 @@
+# Grafana reads dashboard provider definitions from this directory.
+# Keep this file aligned with ../dashboards.yml, which is retained at the
+# repository path required by the observability specification.
+apiVersion: 1
+
+providers:
+  - name: Marketplace MS
+    orgId: 1
+    folder: Marketplace MS
+    type: file
+    disableDeletion: false
+    editable: false
+    updateIntervalSeconds: 10
+    options:
+      path: /etc/grafana/provisioning/dashboards

@@ -20,10 +20,25 @@ describe('MetricsService', () => {
 
     expect(metrics).toContain('# HELP http_requests_total');
     expect(metrics).toContain('# HELP http_request_duration_seconds');
+    expect(metrics).toContain('# TYPE orders_created_total counter');
+    expect(metrics).toContain(
+      '# TYPE rabbitmq_messages_published_total counter',
+    );
     expect(metrics).toContain('# HELP process_cpu_user_seconds_total');
     expect(metrics).toContain('route="/orders/:id"');
     expect(otherMetrics).not.toContain('route="/orders/:id"');
     expect(service.getContentType()).toContain('text/plain');
+  });
+
+  it('records created orders and successful publications independently', async () => {
+    service.recordOrderCreated();
+    service.recordRabbitMqMessagePublished('payment_queue');
+
+    const metrics = await service.getMetrics();
+    expect(metrics).toContain('orders_created_total 1');
+    expect(metrics).toContain(
+      'rabbitmq_messages_published_total{queue="payment_queue"} 1',
+    );
   });
 
   it('records the counter and histogram with complete labels and buckets', async () => {

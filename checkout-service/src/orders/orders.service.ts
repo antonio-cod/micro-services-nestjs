@@ -14,6 +14,7 @@ import type { PaymentResultMessage } from '../events/payment-result.interface';
 import { CheckoutDto } from './dto/checkout.dto';
 import { Order, OrderStatus } from './entities/order.entity';
 import { OrderResponse, toOrderResponse } from './order-response';
+import { MetricsService } from '../metrics/metrics.service';
 
 interface CompletedCheckout {
   order: Order;
@@ -25,6 +26,7 @@ export class OrdersService {
   constructor(
     private readonly dataSource: DataSource,
     private readonly paymentQueueService: PaymentQueueService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   async checkout(userId: string, input: CheckoutDto): Promise<OrderResponse> {
@@ -33,6 +35,8 @@ export class OrdersService {
         (manager: EntityManager): Promise<CompletedCheckout> =>
           this.completeCheckout(manager, userId, input),
       );
+
+    this.metricsService.recordOrderCreated();
 
     const message: PaymentOrderMessage =
       this.createPaymentMessage(completedCheckout);

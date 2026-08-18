@@ -10,12 +10,15 @@ export type HttpMetricLabels = Record<
   'method' | 'route' | 'status_code',
   string
 >;
+export type RabbitMqQueue = 'payment_queue';
 
 @Injectable()
 export class MetricsService {
   private readonly registry = new Registry();
   private readonly httpRequestsTotal: Counter;
   private readonly httpRequestDurationSeconds: Histogram;
+  private readonly ordersCreatedTotal: Counter;
+  private readonly rabbitMqMessagesPublishedTotal: Counter<'queue'>;
 
   constructor() {
     collectDefaultMetrics({ register: this.registry });
@@ -34,11 +37,32 @@ export class MetricsService {
       buckets: [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10],
       registers: [this.registry],
     });
+
+    this.ordersCreatedTotal = new Counter({
+      name: 'orders_created_total',
+      help: 'Total number of orders persisted by completed transactions',
+      registers: [this.registry],
+    });
+
+    this.rabbitMqMessagesPublishedTotal = new Counter({
+      name: 'rabbitmq_messages_published_total',
+      help: 'Total number of successfully published RabbitMQ messages by queue',
+      labelNames: ['queue'] as const,
+      registers: [this.registry],
+    });
   }
 
   recordHttpRequest(labels: HttpMetricLabels, durationSeconds: number): void {
     this.httpRequestsTotal.inc(labels);
     this.httpRequestDurationSeconds.observe(labels, durationSeconds);
+  }
+
+  recordOrderCreated(): void {
+    this.ordersCreatedTotal.inc();
+  }
+
+  recordRabbitMqMessagePublished(queue: RabbitMqQueue): void {
+    this.rabbitMqMessagesPublishedTotal.inc({ queue });
   }
 
   getMetrics(): Promise<string> {

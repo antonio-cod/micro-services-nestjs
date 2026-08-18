@@ -63,6 +63,46 @@ docker compose up -d
 O datasource `Prometheus` e provisionado automaticamente como datasource
 padrao e aponta para `http://prometheus:9090` pela rede interna do Docker.
 
+## Dashboards provisionados
+
+O Grafana carrega automaticamente, na pasta **Marketplace MS**, os dashboards:
+
+- **Marketplace Overview**: saude dos cinco servicos, indicadores HTTP/RED,
+  memoria e metricas de pedidos, pagamentos e publicacoes RabbitMQ;
+- **Service Details**: analise por servico de taxa e erros por rota, percentis de
+  duracao, status codes, CPU, memoria e atraso do event loop.
+
+Os arquivos em `grafana/provisioning/dashboards/` sao a fonte de verdade. O
+provider verifica alteracoes a cada 10 segundos, os dashboards atualizam dados a
+cada 15 segundos e nao sao editaveis pela interface. Mudancas devem ser feitas
+nos JSONs versionados.
+
+O manifesto `grafana/provisioning/dashboards.yml` documenta o provider no caminho
+definido pela especificacao. A copia `dashboards/provider.yml` e necessaria para
+o carregamento, pois o Grafana procura manifestos de dashboards dentro desse
+subdiretorio; ambos devem permanecer sincronizados.
+
+## Referencia PromQL
+
+As consultas de fluxo usam `$__rate_interval`; totais de negocio usam
+`increase(...[$__range])`, pois counters reiniciam junto com os processos.
+
+| Indicador | PromQL |
+|---|---|
+| Status | `up{job=~"api-gateway|users-service|products-service|checkout-service|payments-service"}` |
+| Throughput por servico | `sum by (job) (rate(http_requests_total[$__rate_interval]))` |
+| Erros 4xx por servico | `100 * sum by (job) (rate(http_requests_total{status_code=~"4.."}[$__rate_interval])) / clamp_min(sum by (job) (rate(http_requests_total[$__rate_interval])), 1e-9)` |
+| Erros 5xx por servico | `100 * sum by (job) (rate(http_requests_total{status_code=~"5.."}[$__rate_interval])) / clamp_min(sum by (job) (rate(http_requests_total[$__rate_interval])), 1e-9)` |
+| P95 por servico | `histogram_quantile(0.95, sum by (job, le) (rate(http_request_duration_seconds_bucket[$__rate_interval])))` |
+| Rate por rota | `sum by (method, route) (rate(http_requests_total{job="$service"}[$__rate_interval]))` |
+| Quantil por rota | `histogram_quantile(QUANTIL, sum by (le, method, route) (rate(http_request_duration_seconds_bucket{job="$service"}[$__rate_interval])))` |
+| Top 10 rotas | `topk(10, sum by (method, route) (increase(http_requests_total{job="$service"}[$__range])))` |
+| CPU | `rate(process_cpu_user_seconds_total{job="$service"}[$__rate_interval]) + rate(process_cpu_system_seconds_total{job="$service"}[$__rate_interval])` |
+| Pagamentos processados | `sum(increase(payments_processed_total{job="payments-service"}[$__range])) or on() vector(0)` |
+| Rejeicoes por motivo | `sum by (reason) (increase(payments_rejected_total{job="payments-service"}[$__range]))` |
+| Pedidos criados | `sum(increase(orders_created_total{job="checkout-service"}[$__range])) or on() vector(0)` |
+| Publicacoes por fila | `sum by (queue) (increase(rabbitmq_messages_published_total{job="checkout-service"}[$__range]))` |
+
 ## Diagnostico do Prometheus
 
 Os cinco servicos da aplicacao sao executados diretamente no host. O Prometheus

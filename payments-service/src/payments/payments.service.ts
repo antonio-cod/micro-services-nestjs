@@ -5,6 +5,7 @@ import { PaymentOrderMessage } from '../events/payment-queue.interface';
 import { Payment } from './entities/payment.entity';
 import { FakePaymentGatewayService } from './fake-payment-gateway.service';
 import { PaymentStatus } from './payment-status.enum';
+import { MetricsService } from '../metrics/metrics.service';
 
 @Injectable()
 export class PaymentsService {
@@ -12,6 +13,7 @@ export class PaymentsService {
     @InjectRepository(Payment)
     private readonly paymentsRepository: Repository<Payment>,
     private readonly paymentGateway: FakePaymentGatewayService,
+    private readonly metricsService: MetricsService,
   ) {}
 
   async processPayment(message: PaymentOrderMessage): Promise<Payment> {
@@ -50,7 +52,15 @@ export class PaymentsService {
       payment.rejectionReason = result.rejectionReason ?? null;
     }
 
-    return this.paymentsRepository.save(payment);
+    const savedPayment = await this.paymentsRepository.save(payment);
+
+    if (savedPayment.status === PaymentStatus.APPROVED) {
+      this.metricsService.recordPaymentApproved();
+    } else {
+      this.metricsService.recordPaymentRejected(savedPayment.rejectionReason);
+    }
+
+    return savedPayment;
   }
 
   async findByOrderId(orderId: string): Promise<Payment> {

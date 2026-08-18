@@ -1,14 +1,17 @@
 import { PaymentMethod } from '../../orders/entities/order.entity';
 import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
 import { PaymentQueueService } from './payment-queue.service';
+import { MetricsService } from '../../metrics/metrics.service';
 
 describe('PaymentQueueService', () => {
   it('publishes a typed order to the payments exchange and routing key', async () => {
     const rabbitmqService = {
       publishMessage: jest.fn().mockResolvedValue(undefined),
     };
+    const metricsService = { recordRabbitMqMessagePublished: jest.fn() };
     const service = new PaymentQueueService(
       rabbitmqService as unknown as RabbitmqService,
+      metricsService as unknown as MetricsService,
     );
 
     await service.publishPaymentOrder({
@@ -33,14 +36,19 @@ describe('PaymentQueueService', () => {
         paymentMethod: PaymentMethod.PIX,
       }),
     );
+    expect(metricsService.recordRabbitMqMessagePublished).toHaveBeenCalledWith(
+      'payment_queue',
+    );
   });
 
   it('propagates publisher failures', async () => {
     const rabbitmqService = {
       publishMessage: jest.fn().mockRejectedValue(new Error('unavailable')),
     };
+    const metricsService = { recordRabbitMqMessagePublished: jest.fn() };
     const service = new PaymentQueueService(
       rabbitmqService as unknown as RabbitmqService,
+      metricsService as unknown as MetricsService,
     );
 
     await expect(
@@ -58,5 +66,8 @@ describe('PaymentQueueService', () => {
         paymentMethod: PaymentMethod.CREDIT_CARD,
       }),
     ).rejects.toThrow('unavailable');
+    expect(
+      metricsService.recordRabbitMqMessagePublished,
+    ).not.toHaveBeenCalled();
   });
 });

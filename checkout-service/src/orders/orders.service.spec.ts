@@ -10,6 +10,7 @@ import { PaymentQueueService } from '../events/payment-queue/payment-queue.servi
 import { PaymentResultMessage } from '../events/payment-result.interface';
 import { Order, OrderStatus, PaymentMethod } from './entities/order.entity';
 import { OrdersService } from './orders.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 const userId = '91afac99-0cd9-4438-945e-2766594a725c';
 const cartId = '9bf702fe-dbb4-42af-bc42-956681ed1385';
@@ -71,6 +72,7 @@ describe('OrdersService', () => {
     findOne: jest.Mock;
   };
   let manager: { getRepository: jest.Mock };
+  let metricsService: { recordOrderCreated: jest.Mock };
 
   beforeEach(() => {
     cartRepository = {
@@ -103,9 +105,11 @@ describe('OrdersService', () => {
     paymentQueueService = {
       publishPaymentOrder: jest.fn().mockResolvedValue(undefined),
     };
+    metricsService = { recordOrderCreated: jest.fn() };
     service = new OrdersService(
       dataSource as unknown as DataSource,
       paymentQueueService as unknown as PaymentQueueService,
+      metricsService as unknown as MetricsService,
     );
   });
 
@@ -139,6 +143,7 @@ describe('OrdersService', () => {
         createdAt: order.createdAt,
       });
       expect(result).toMatchObject({ id: orderId, status: 'pending' });
+      expect(metricsService.recordOrderCreated).toHaveBeenCalledTimes(1);
     },
   );
 
@@ -150,6 +155,7 @@ describe('OrdersService', () => {
     ).rejects.toBeInstanceOf(UnprocessableEntityException);
     expect(orderRepository.save).not.toHaveBeenCalled();
     expect(paymentQueueService.publishPaymentOrder).not.toHaveBeenCalled();
+    expect(metricsService.recordOrderCreated).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -179,6 +185,7 @@ describe('OrdersService', () => {
     expect(cartRepository.save).toHaveBeenCalledWith(
       expect.objectContaining({ status: CartStatus.COMPLETED }),
     );
+    expect(metricsService.recordOrderCreated).toHaveBeenCalledTimes(1);
   });
 
   it('lets transaction failures roll back without publishing', async () => {
@@ -188,6 +195,7 @@ describe('OrdersService', () => {
       service.checkout(userId, { paymentMethod: PaymentMethod.DEBIT_CARD }),
     ).rejects.toThrow('database failure');
     expect(paymentQueueService.publishPaymentOrder).not.toHaveBeenCalled();
+    expect(metricsService.recordOrderCreated).not.toHaveBeenCalled();
   });
 
   it('lists only user orders in descending creation order', async () => {

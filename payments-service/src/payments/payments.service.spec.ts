@@ -6,6 +6,7 @@ import { Payment } from './entities/payment.entity';
 import { FakePaymentGatewayService } from './fake-payment-gateway.service';
 import { PaymentStatus } from './payment-status.enum';
 import { PaymentsService } from './payments.service';
+import { MetricsService } from '../metrics/metrics.service';
 
 describe('PaymentsService', () => {
   const message: PaymentOrderMessage = {
@@ -18,6 +19,9 @@ describe('PaymentsService', () => {
   let repository: jest.Mocked<Repository<Payment>>;
   let gateway: jest.Mocked<FakePaymentGatewayService>;
   let service: PaymentsService;
+  let metrics: jest.Mocked<
+    Pick<MetricsService, 'recordPaymentApproved' | 'recordPaymentRejected'>
+  >;
 
   beforeEach(() => {
     repository = {
@@ -28,7 +32,15 @@ describe('PaymentsService', () => {
     gateway = {
       process: jest.fn(),
     } as unknown as jest.Mocked<FakePaymentGatewayService>;
-    service = new PaymentsService(repository, gateway);
+    metrics = {
+      recordPaymentApproved: jest.fn(),
+      recordPaymentRejected: jest.fn(),
+    };
+    service = new PaymentsService(
+      repository,
+      gateway,
+      metrics as unknown as MetricsService,
+    );
   });
 
   it('persists pending before the gateway and then approves', async () => {
@@ -52,6 +64,8 @@ describe('PaymentsService', () => {
       processedAt: expect.any(Date),
     });
     expect(repository.save).toHaveBeenCalledTimes(2);
+    expect(metrics.recordPaymentApproved).toHaveBeenCalledTimes(1);
+    expect(metrics.recordPaymentRejected).not.toHaveBeenCalled();
   });
 
   it('persists a business rejection as a successful result', async () => {
@@ -69,6 +83,10 @@ describe('PaymentsService', () => {
       rejectionReason: 'Limite excedido',
       processedAt: expect.any(Date),
     });
+    expect(metrics.recordPaymentRejected).toHaveBeenCalledWith(
+      'Limite excedido',
+    );
+    expect(metrics.recordPaymentApproved).not.toHaveBeenCalled();
   });
 
   it('reuses a pending payment after a retry', async () => {
@@ -90,6 +108,7 @@ describe('PaymentsService', () => {
 
     expect(repository.create).not.toHaveBeenCalled();
     expect(repository.save).toHaveBeenCalledTimes(1);
+    expect(metrics.recordPaymentApproved).toHaveBeenCalledTimes(1);
   });
 
   it('returns an existing final payment without processing it again', async () => {
@@ -102,6 +121,8 @@ describe('PaymentsService', () => {
     await expect(service.processPayment(message)).resolves.toBe(approved);
     expect(gateway.process).not.toHaveBeenCalled();
     expect(repository.save).not.toHaveBeenCalled();
+    expect(metrics.recordPaymentApproved).not.toHaveBeenCalled();
+    expect(metrics.recordPaymentRejected).not.toHaveBeenCalled();
   });
 
   it('propagates technical gateway failures', async () => {
@@ -110,6 +131,25 @@ describe('PaymentsService', () => {
     await expect(service.processPayment(message)).rejects.toThrow(
       'gateway unavailable',
     );
+    expect(metrics.recordPaymentApproved).not.toHaveBeenCalled();
+    expect(metrics.recordPaymentRejected).not.toHaveBeenCalled();
+  });
+
+  it('does not record metrics when terminal persistence fails', async () => {
+    repository.findOneBy.mockResolvedValue(null);
+    repository.save
+      .mockResolvedValueOnce({ status: PaymentStatus.PENDING } as Payment)
+      .mockRejectedValueOnce(new Error('database unavailable'));
+    gateway.process.mockResolvedValue({
+      approved: true,
+      transactionId: 'transaction-id',
+    });
+
+    await expect(service.processPayment(message)).rejects.toThrow(
+      'database unavailable',
+    );
+    expect(metrics.recordPaymentApproved).not.toHaveBeenCalled();
+    expect(metrics.recordPaymentRejected).not.toHaveBeenCalled();
   });
 
   it('finds a payment by order id or returns not found', async () => {

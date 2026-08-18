@@ -20,10 +20,38 @@ describe('MetricsService', () => {
 
     expect(metrics).toContain('# HELP http_requests_total');
     expect(metrics).toContain('# HELP http_request_duration_seconds');
+    expect(metrics).toContain('# TYPE payments_processed_total counter');
+    expect(metrics).toContain('# TYPE payments_approved_total counter');
+    expect(metrics).toContain('# TYPE payments_rejected_total counter');
     expect(metrics).toContain('# HELP process_cpu_user_seconds_total');
     expect(metrics).toContain('route="/payments/:orderId"');
     expect(otherMetrics).not.toContain('route="/payments/:orderId"');
     expect(service.getContentType()).toContain('text/plain');
+  });
+
+  it('records approved payments as processed and approved', async () => {
+    service.recordPaymentApproved();
+
+    const metrics = await service.getMetrics();
+    expect(metrics).toContain('payments_processed_total 1');
+    expect(metrics).toContain('payments_approved_total 1');
+    expect(metrics).not.toContain('payments_rejected_total{');
+  });
+
+  it.each([
+    ['Limite excedido', 'limite_excedido'],
+    ['Cartão recusado pela operadora', 'cartao_recusado_pela_operadora'],
+    ['Unexpected gateway text', 'unknown'],
+    [undefined, 'unknown'],
+  ])('records rejection reason %p as %s', async (reason, expected) => {
+    service.recordPaymentRejected(reason);
+
+    const metrics = await service.getMetrics();
+    expect(metrics).toContain('payments_processed_total 1');
+    expect(metrics).toContain(
+      `payments_rejected_total{reason="${expected}"} 1`,
+    );
+    expect(metrics).toContain('payments_approved_total 0');
   });
 
   it('records the counter and histogram with complete labels and buckets', async () => {
