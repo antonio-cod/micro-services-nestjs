@@ -25,6 +25,9 @@ interface OrderResponse {
   paymentMethod: string;
   total: number;
   userId: string;
+  status: 'pending' | 'paid' | 'failed' | 'cancelled';
+  createdAt: string;
+  updatedAt: string;
 }
 
 interface PaymentResponse {
@@ -32,7 +35,9 @@ interface PaymentResponse {
   userId: string;
   amount: number;
   paymentMethod: string;
-  status: string;
+  status: 'pending' | 'approved' | 'rejected';
+  transactionId: string | null;
+  rejectionReason: string | null;
 }
 
 describe('marketplace integration through the running gateway (e2e)', () => {
@@ -45,12 +50,12 @@ describe('marketplace integration through the running gateway (e2e)', () => {
     const approvedProduct = await createProduct(
       seller.token,
       `Approved product ${runId}`,
-      49.9,
+      150,
     );
     const rejectedProduct = await createProduct(
       seller.token,
       `Rejected product ${runId}`,
-      19.99,
+      49.99,
     );
 
     const catalog = await gateway.get('/products').expect(200);
@@ -81,6 +86,10 @@ describe('marketplace integration through the running gateway (e2e)', () => {
       approvedProduct.price,
       'approved',
     );
+    expect(approvedPayment.transactionId).toEqual(expect.any(String));
+    expect(approvedPayment.transactionId).not.toHaveLength(0);
+    expect(approvedPayment.rejectionReason).toBeNull();
+    await waitForOrderStatus(authorization, approvedOrder, 'paid');
 
     const emptyCart = await gateway
       .get('/cart')
@@ -108,6 +117,16 @@ describe('marketplace integration through the running gateway (e2e)', () => {
       rejectedProduct.price,
       'rejected',
     );
+    expect(rejectedPayment.transactionId).toBeNull();
+    expect(rejectedPayment.rejectionReason).toBe(
+      'Cartão recusado pela operadora',
+    );
+    await waitForOrderStatus(authorization, rejectedOrder, 'failed');
+
+    await gateway
+      .get('/payments/00000000-0000-4000-8000-000000000000')
+      .set('Authorization', authorization)
+      .expect(404);
   });
 
   it('rejects checkout and payment routes without a token', async () => {
@@ -115,6 +134,26 @@ describe('marketplace integration through the running gateway (e2e)', () => {
     await gateway
       .get('/payments/00000000-0000-4000-8000-000000000000')
       .expect(401);
+  });
+
+  it('reports the gateway and all marketplace services as healthy', async () => {
+    const gatewayHealth = await gateway.get('/health').expect(200);
+    expect(gatewayHealth.body).toEqual(
+      expect.objectContaining({ status: 'ok' }),
+    );
+
+    const response = await gateway.get('/health/services').expect(200);
+    expect(response.body).toMatchObject({
+      overallStatus: 'healthy',
+      summary: { total: 4, healthy: 4, unhealthy: 0, degraded: 0 },
+    });
+    expect(response.body.services).toEqual(
+      expect.arrayContaining(
+        ['users', 'products', 'checkout', 'payments'].map((name: string) =>
+          expect.objectContaining({ name, status: 'healthy' }),
+        ),
+      ),
+    );
   });
 
   async function registerAndLogin(role: 'seller' | 'buyer') {
@@ -193,7 +232,16 @@ describe('marketplace integration through the running gateway (e2e)', () => {
       paymentMethod: 'pix',
       total: product.price,
       userId: buyerId,
+      status: 'pending',
     });
+
+    const orders = await gateway
+      .get('/orders')
+      .set('Authorization', authorization)
+      .expect(200);
+    expect(orders.body).toEqual(
+      expect.arrayContaining([expect.objectContaining(order)]),
+    );
 
     await gateway
       .get(`/orders/${order.id}`)
@@ -202,6 +250,54 @@ describe('marketplace integration through the running gateway (e2e)', () => {
       .expect(({ body }) => expect(body).toMatchObject(order));
 
     return order;
+  }
+
+  async function waitForOrderStatus(
+    authorization: string,
+    checkoutOrder: OrderResponse,
+    expectedStatus: 'paid' | 'failed',
+  ): Promise<OrderResponse> {
+    const deadline = Date.now() + paymentTimeoutMs;
+    let lastResult = 'no response';
+
+    while (Date.now() < deadline) {
+      const response = await gateway
+        .get(`/orders/${checkoutOrder.id}`)
+        .set('Authorization', authorization);
+      lastResult = `${response.status}: ${JSON.stringify(response.body)}`;
+
+      if (response.status === 200 && response.body.status === expectedStatus) {
+        const updatedOrder = response.body as OrderResponse;
+        expect(updatedOrder).toMatchObject({
+          id: checkoutOrder.id,
+          cartId: checkoutOrder.cartId,
+          paymentMethod: checkoutOrder.paymentMethod,
+          total: checkoutOrder.total,
+          userId: checkoutOrder.userId,
+          status: expectedStatus,
+          createdAt: checkoutOrder.createdAt,
+        });
+
+        const orders = await gateway
+          .get('/orders')
+          .set('Authorization', authorization)
+          .expect(200);
+        expect(orders.body).toEqual(
+          expect.arrayContaining([expect.objectContaining(updatedOrder)]),
+        );
+        return updatedOrder;
+      }
+      if (response.status !== 200 || response.body.status !== 'pending') {
+        throw new Error(
+          `Unexpected order response for ${checkoutOrder.id}: ${lastResult}`,
+        );
+      }
+      await delay(paymentPollIntervalMs);
+    }
+
+    throw new Error(
+      `Timed out waiting for order ${checkoutOrder.id} to become ${expectedStatus}; last result: ${lastResult}`,
+    );
   }
 
   async function waitForPayment(

@@ -1,4 +1,9 @@
-import { forwardRef, Inject, Injectable, OnModuleInit } from '@nestjs/common';
+import {
+  forwardRef,
+  Inject,
+  Injectable,
+  OnApplicationBootstrap,
+} from '@nestjs/common';
 import { OrdersService } from '../../orders/orders.service';
 import {
   parsePaymentResultMessage,
@@ -7,7 +12,7 @@ import {
 import { RabbitmqService } from '../rabbitmq/rabbitmq.service';
 
 @Injectable()
-export class PaymentResultConsumerService implements OnModuleInit {
+export class PaymentResultConsumerService implements OnApplicationBootstrap {
   private readonly queueName = 'payment_result_queue';
   private readonly exchange = 'payments';
   private readonly routingKey = 'payment.result';
@@ -18,7 +23,7 @@ export class PaymentResultConsumerService implements OnModuleInit {
     private readonly ordersService: OrdersService,
   ) {}
 
-  async onModuleInit(): Promise<void> {
+  async onApplicationBootstrap(): Promise<void> {
     await this.rabbitmqService.subscribeToQueue(
       this.queueName,
       this.exchange,

@@ -30,7 +30,7 @@ describe('PaymentResultConsumerService', () => {
   });
 
   it('subscribes to the payment result queue with bounded retries', async () => {
-    await service.onModuleInit();
+    await service.onApplicationBootstrap();
 
     expect(rabbitmqService.subscribeToQueue).toHaveBeenCalledWith(
       'payment_result_queue',
