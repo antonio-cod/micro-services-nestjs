@@ -5,13 +5,13 @@ import { PaymentQueueService } from './payment-queue/payment-queue.service';
 import { RabbitmqService } from './rabbitmq/rabbitmq.service';
 import { DlqService } from './dlq/dlq.service';
 import { DlqController } from './dlq/dlq.controller';
-import { MetricsController } from './metrics/metrics.controller';
+import { ConsumerMetricsController } from './metrics/consumer-metrics.controller';
 import { PaymentsModule } from '../payments/payments.module';
 import { PaymentResultPublisherService } from './payment-result/payment-result-publisher.service';
 
 @Module({
   imports: [ConfigModule, PaymentsModule],
-  controllers: [DlqController, MetricsController],
+  controllers: [DlqController, ConsumerMetricsController],
   providers: [
     RabbitmqService,
     PaymentQueueService,

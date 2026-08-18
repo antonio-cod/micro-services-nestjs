@@ -515,6 +515,24 @@ describe('AppController (e2e)', () => {
       expect(response.body).not.toHaveProperty('password');
     });
 
+    it('exports a parameterized user route without concrete IDs or self-scrapes', async () => {
+      await request(app.getHttpServer())
+        .get(`/users/${inactiveUserId}?source=metrics-test`)
+        .set('Authorization', `Bearer ${token}`)
+        .expect(200);
+
+      const response = await request(app.getHttpServer())
+        .get('/metrics?source=prometheus')
+        .expect(200);
+
+      expect(response.text).toContain(
+        'http_requests_total{method="GET",route="/users/:id",status_code="200"}',
+      );
+      expect(response.text).not.toContain(inactiveUserId);
+      expect(response.text).not.toContain('source=metrics-test');
+      expect(response.text).not.toContain('route="/metrics"');
+    });
+
     it('returns 404 for an unknown valid UUID', async () => {
       const response = await request(app.getHttpServer())
         .get('/users/00000000-0000-4000-8000-000000000000')

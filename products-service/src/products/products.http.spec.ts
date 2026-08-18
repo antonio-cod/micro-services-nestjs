@@ -9,6 +9,7 @@ import { Test, TestingModule } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AuthModule } from '../auth/auth.module';
+import { MetricsModule } from '../metrics/metrics.module';
 import { CreateProductDto } from './dto/create-product.dto';
 import { Product } from './entities/product.entity';
 import { ProductsController } from './products.controller';
@@ -46,7 +47,11 @@ describe('Products endpoints (HTTP)', () => {
     findOne = jest.fn<Promise<Product>, [string]>();
 
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [ConfigModule.forRoot({ isGlobal: true }), AuthModule],
+      imports: [
+        ConfigModule.forRoot({ isGlobal: true }),
+        AuthModule,
+        MetricsModule,
+      ],
       controllers: [ProductsController],
       providers: [
         {
@@ -264,5 +269,25 @@ describe('Products endpoints (HTTP)', () => {
       .expect(401);
 
     expect(create).not.toHaveBeenCalled();
+  });
+
+  it('exports a parameterized product route without concrete IDs or self-scrapes', async () => {
+    const productId = '5ac9aa73-b746-4d95-a888-fd3d63ea9d9f';
+    findOne.mockResolvedValue({ id: productId } as Product);
+
+    await request(app.getHttpServer())
+      .get(`/products/${productId}?source=metrics-test`)
+      .expect(200);
+
+    const response = await request(app.getHttpServer())
+      .get('/metrics?source=prometheus')
+      .expect(200);
+
+    expect(response.text).toContain(
+      'http_requests_total{method="GET",route="/products/:id",status_code="200"}',
+    );
+    expect(response.text).not.toContain(productId);
+    expect(response.text).not.toContain('source=metrics-test');
+    expect(response.text).not.toContain('route="/metrics"');
   });
 });
