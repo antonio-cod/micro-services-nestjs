@@ -296,16 +296,18 @@ Detalhes adicionais da stack estão em [observability-stack/README.md](observabi
 
 ## Diagrama completo da arquitetura
 
-O desenho abaixo é a exportação visual do arquivo [marketplace-ms.excalidraw](docs/architecture/marketplace-ms.excalidraw), preservando cores, componentes, conexões e legendas do diagrama da arquitetura.
-
 <p align="center">
-  <a href="docs/architecture/marketplace-ms.excalidraw" title="Abrir o arquivo editável do Excalidraw">
-    <img
-      src="docs/architecture/marketplace-ms.svg"
-      alt="Diagrama completo da arquitetura do Marketplace MS"
-      width="100%"
-    />
-  </a>
+  <img
+    src="Captura%20de%20tela%20de%202026-08-19%2019-59-54.png"
+    alt="Primeira parte do diagrama completo da arquitetura do Marketplace MS"
+    width="100%"
+  />
 </p>
 
-> Para editar o desenho, baixe o arquivo `.excalidraw` pelo link acima e importe-o em [excalidraw.com](https://excalidraw.com/).
+<p align="center">
+  <img
+    src="Captura%20de%20tela%20de%202026-08-19%2020-00-31.png"
+    alt="Segunda parte do diagrama completo da arquitetura do Marketplace MS"
+    width="100%"
+  />
+</p>
