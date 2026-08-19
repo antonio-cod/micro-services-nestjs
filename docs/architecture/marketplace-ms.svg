@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="850" viewBox="0 0 1400 850" role="img" aria-labelledby="title desc">
+  <title id="title">Arquitetura do Marketplace MS</title>
+  <desc id="desc">Cliente acessa o API Gateway, que encaminha chamadas aos serviços de usuários, produtos, checkout e pagamentos. Cada domínio possui PostgreSQL próprio. Checkout e pagamentos trocam eventos pelo RabbitMQ. Prometheus coleta métricas e Grafana as apresenta.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0 0L10 5L0 10Z" fill="#495057"/></marker>
+    <style>
+      .title{font:700 30px Arial,sans-serif;fill:#212529}.subtitle{font:16px Arial,sans-serif;fill:#495057}.name{font:700 18px Arial,sans-serif;fill:#212529}.detail{font:14px Arial,sans-serif;fill:#495057}.small{font:13px Arial,sans-serif;fill:#495057}.line{fill:none;stroke:#495057;stroke-width:2.5;marker-end:url(#arrow)}.dash{fill:none;stroke:#6741d9;stroke-width:2.5;stroke-dasharray:8 7;marker-end:url(#arrow)}.metric{fill:none;stroke:#2b8a3e;stroke-width:2;stroke-dasharray:6 6;marker-end:url(#arrow)}
+    </style>
+  </defs>
+  <rect width="1400" height="850" fill="#fffdf8"/>
+  <text x="700" y="45" text-anchor="middle" class="title">Marketplace MS — Arquitetura</text>
+  <text x="700" y="72" text-anchor="middle" class="subtitle">NestJS · APIs REST · eventos assíncronos · database per service</text>
+
+  <rect x="55" y="120" width="180" height="86" rx="16" fill="#e7f5ff" stroke="#1971c2" stroke-width="2"/>
+  <text x="145" y="154" text-anchor="middle" class="name">Cliente</text><text x="145" y="180" text-anchor="middle" class="detail">Web / Mobile / API</text>
+  <rect x="330" y="105" width="275" height="116" rx="16" fill="#fff3bf" stroke="#f08c00" stroke-width="2.5"/>
+  <text x="468" y="140" text-anchor="middle" class="name">API Gateway :3005</text><text x="468" y="166" text-anchor="middle" class="detail">JWT · Proxy · Rate limiting</text><text x="468" y="190" text-anchor="middle" class="detail">Retry · Timeout · Circuit breaker</text>
+  <path d="M235 163H325" class="line"/><text x="280" y="150" text-anchor="middle" class="small">HTTP</text>
+
+  <rect x="700" y="105" width="235" height="116" rx="16" fill="#d3f9d8" stroke="#2b8a3e" stroke-width="2"/>
+  <text x="818" y="138" text-anchor="middle" class="name">Users :3000</text><text x="818" y="164" text-anchor="middle" class="detail">Registro · Login · Perfis</text><text x="818" y="188" text-anchor="middle" class="detail">JWT · bcryptjs</text>
+  <rect x="1085" y="105" width="235" height="116" rx="16" fill="#d3f9d8" stroke="#2b8a3e" stroke-width="2"/>
+  <text x="1203" y="138" text-anchor="middle" class="name">Products :3001</text><text x="1203" y="164" text-anchor="middle" class="detail">Catálogo · Estoque</text><text x="1203" y="188" text-anchor="middle" class="detail">Produtos por vendedor</text>
+  <rect x="700" y="355" width="235" height="116" rx="16" fill="#e5dbff" stroke="#6741d9" stroke-width="2"/>
+  <text x="818" y="388" text-anchor="middle" class="name">Checkout :3003</text><text x="818" y="414" text-anchor="middle" class="detail">Carrinho · Pedidos</text><text x="818" y="438" text-anchor="middle" class="detail">Consulta Products via HTTP</text>
+  <rect x="1085" y="355" width="235" height="116" rx="16" fill="#ffe3e3" stroke="#c92a2a" stroke-width="2"/>
+  <text x="1203" y="388" text-anchor="middle" class="name">Payments :3004</text><text x="1203" y="414" text-anchor="middle" class="detail">Processamento de pagamento</text><text x="1203" y="438" text-anchor="middle" class="detail">FakePaymentGateway · DLQ</text>
+
+  <path d="M605 138H695" class="line"/><path d="M605 163H1080" class="line"/><path d="M520 221L760 350" class="line"/><path d="M555 221L1135 350" class="line"/>
+  <text x="650" y="125" class="small">REST</text><text x="970" y="151" class="small">REST</text><text x="650" y="280" class="small">REST</text>
+  <path d="M935 390C990 350 1030 350 1080 390" class="line"/><text x="1008" y="345" text-anchor="middle" class="small">HTTP: produto</text>
+
+  <rect x="700" y="570" width="235" height="92" rx="14" fill="#f1f3f5" stroke="#495057" stroke-width="2"/><text x="818" y="607" text-anchor="middle" class="name">PostgreSQL</text><text x="818" y="634" text-anchor="middle" class="detail">checkout_db :5436</text>
+  <rect x="1085" y="570" width="235" height="92" rx="14" fill="#f1f3f5" stroke="#495057" stroke-width="2"/><text x="1203" y="607" text-anchor="middle" class="name">PostgreSQL</text><text x="1203" y="634" text-anchor="middle" class="detail">payments_db :5435</text>
+  <rect x="700" y="250" width="235" height="72" rx="14" fill="#f1f3f5" stroke="#495057" stroke-width="2"/><text x="818" y="280" text-anchor="middle" class="name">PostgreSQL</text><text x="818" y="304" text-anchor="middle" class="detail">users_db :5433</text>
+  <rect x="1085" y="250" width="235" height="72" rx="14" fill="#f1f3f5" stroke="#495057" stroke-width="2"/><text x="1203" y="280" text-anchor="middle" class="name">PostgreSQL</text><text x="1203" y="304" text-anchor="middle" class="detail">products_db :5434</text>
+  <path d="M818 221V245" class="line"/><path d="M1203 221V245" class="line"/><path d="M818 471V565" class="line"/><path d="M1203 471V565" class="line"/>
+
+  <rect x="890" y="730" width="240" height="88" rx="16" fill="#fff0f6" stroke="#a61e4d" stroke-width="2.5"/><text x="1010" y="766" text-anchor="middle" class="name">RabbitMQ :5672</text><text x="1010" y="792" text-anchor="middle" class="detail">payment.order ↔ payment.result</text>
+  <path d="M790 471C760 650 845 723 915 735" class="dash"/><path d="M1205 662C1190 715 1150 748 1135 758" class="dash"/><path d="M1120 730C1165 675 1220 650 1240 475" class="dash"/><path d="M940 780C850 750 800 650 820 476" class="dash"/>
+
+  <rect x="55" y="570" width="225" height="92" rx="14" fill="#d3f9d8" stroke="#2b8a3e" stroke-width="2"/><text x="168" y="607" text-anchor="middle" class="name">Prometheus :9090</text><text x="168" y="634" text-anchor="middle" class="detail">Scrape /metrics</text>
+  <rect x="330" y="570" width="225" height="92" rx="14" fill="#fff3bf" stroke="#f08c00" stroke-width="2"/><text x="443" y="607" text-anchor="middle" class="name">Grafana :3010</text><text x="443" y="634" text-anchor="middle" class="detail">Dashboards e alertas</text>
+  <path d="M280 616H325" class="metric"/><path d="M468 221C430 350 250 420 180 565" class="metric"/><path d="M700 410C520 430 300 490 205 565" class="metric"/>
+  <text x="700" y="838" text-anchor="middle" class="small">Linhas sólidas: HTTP/SQL · linhas roxas: eventos RabbitMQ · linhas verdes: métricas</text>
+</svg>
