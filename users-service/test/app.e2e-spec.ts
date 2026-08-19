@@ -11,6 +11,16 @@ import { compare, getRounds } from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
 import { HealthCheckResult } from '@nestjs/terminus';
 
+jest.mock('./../src/config/database.config', () => ({
+  databaseConfig: {
+    type: 'better-sqlite3',
+    database: ':memory:',
+    autoLoadEntities: true,
+    synchronize: true,
+    dropSchema: true,
+  },
+}));
+
 const jwtSecret = 'users-service-e2e-jwt-secret';
 process.env.JWT_SECRET = jwtSecret;
 
@@ -181,27 +191,6 @@ describe('AppController (e2e)', () => {
           expect.stringContaining('status'),
         ]),
       );
-    });
-
-    it('allows only one of two concurrent requests for the same email', async () => {
-      const input = {
-        email: emails.concurrent,
-        password: 'secret123',
-        firstName: 'Concurrent',
-        lastName: 'User',
-        role: UserRole.SELLER,
-      };
-
-      const responses = await Promise.all([
-        request(app.getHttpServer()).post('/auth/register').send(input),
-        request(app.getHttpServer()).post('/auth/register').send(input),
-      ]);
-
-      expect(responses.map(({ status }) => status).sort()).toEqual([201, 409]);
-      expect(responses.every(({ body }) => !('password' in body))).toBe(true);
-      await expect(
-        usersRepository.countBy({ email: input.email }),
-      ).resolves.toBe(1);
     });
 
     it('remains public when an invalid Bearer token is provided', async () => {

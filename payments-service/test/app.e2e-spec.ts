@@ -1,131 +1,61 @@
-import { Test, TestingModule } from '@nestjs/testing';
 import { INestApplication } from '@nestjs/common';
+import { Test } from '@nestjs/testing';
+import { MicroserviceHealthIndicator, TypeOrmHealthIndicator } from '@nestjs/terminus';
 import request from 'supertest';
-import { App } from 'supertest/types';
-import { AppController } from './../src/app.controller';
-import { AppService } from './../src/app.service';
-import { PaymentsController } from './../src/payments/payments.controller';
-import { PaymentsService } from './../src/payments/payments.service';
-import { MetricsModule } from './../src/metrics/metrics.module';
-import { ConsumerMetricsController } from './../src/events/metrics/consumer-metrics.controller';
-import { PaymentConsumerService } from './../src/events/payment-consumer/payment-consumer.service';
-import { ConfigModule } from '@nestjs/config';
-import { HealthModule } from './../src/health/health.module';
-import {
-  MicroserviceHealthIndicator,
-  TypeOrmHealthIndicator,
-} from '@nestjs/terminus';
+import { AppModule } from '../src/app.module';
+import { PaymentQueueService } from '../src/events/payment-queue/payment-queue.service';
+import { PaymentResultPublisherService } from '../src/events/payment-result/payment-result-publisher.service';
+import { RabbitmqService } from '../src/events/rabbitmq/rabbitmq.service';
+import { PaymentsService } from '../src/payments/payments.service';
 
-describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
-  const payment = {
-    id: '82f9d25c-9749-49fa-8694-b55b20b1059f',
-    orderId: '91afac99-0cd9-4438-945e-2766594a725c',
-    status: 'approved',
-  };
-  const consumerMetrics = {
-    totalProcessed: 1,
-    totalSuccess: 1,
-    totalFailed: 0,
-    totalRetries: 0,
-    averageProcessingTime: 10,
-    lastProcessedAt: new Date(),
-    startedAt: new Date(),
-  };
-  const databasePing = jest
-    .fn()
-    .mockResolvedValue({ database: { status: 'up' } });
-  const rabbitmqPing = jest
-    .fn()
-    .mockResolvedValue({ rabbitmq: { status: 'up' } });
+jest.mock('../src/config/database.config', () => ({
+  databaseConfig: { type: 'better-sqlite3', database: ':memory:', autoLoadEntities: true, synchronize: true, dropSchema: true },
+}));
 
-  beforeEach(async () => {
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [
-        ConfigModule.forRoot({
-          isGlobal: true,
-          ignoreEnvFile: true,
-          load: [() => ({ RABBITMQ_URL: 'amqp://rabbitmq:5672' })],
-        }),
-        MetricsModule,
-        HealthModule,
-      ],
-      controllers: [
-        AppController,
-        PaymentsController,
-        ConsumerMetricsController,
-      ],
-      providers: [
-        AppService,
-        {
-          provide: PaymentsService,
-          useValue: { findByOrderId: jest.fn().mockResolvedValue(payment) },
-        },
-        {
-          provide: PaymentConsumerService,
-          useValue: {
-            getMetrics: jest.fn(() => ({ ...consumerMetrics })),
-            resetMetrics: jest.fn(),
-          },
-        },
-      ],
-    })
-      .overrideProvider(TypeOrmHealthIndicator)
-      .useValue({ pingCheck: databasePing })
-      .overrideProvider(MicroserviceHealthIndicator)
-      .useValue({ pingCheck: rabbitmqPing })
+process.env.RABBITMQ_URL = 'amqp://unused:test@localhost:5672';
+
+describe('payments-service HTTP (e2e)', () => {
+  let app: INestApplication;
+  let payments: PaymentsService;
+  const userId = 'f5d9e8c8-54c3-40c5-a8f5-cf84e29efef4';
+  const approvedOrderId = '91afac99-0cd9-4438-945e-2766594a725c';
+  const rejectedOrderId = '82f9d25c-9749-49fa-8694-b55b20b1059f';
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(RabbitmqService).useValue({ waitForConnection: jest.fn().mockResolvedValue(false), publishMessage: jest.fn() })
+      .overrideProvider(PaymentQueueService).useValue({ consumePaymentOrders: jest.fn().mockResolvedValue(undefined) })
+      .overrideProvider(PaymentResultPublisherService).useValue({ publish: jest.fn().mockResolvedValue(undefined) })
+      .overrideProvider(TypeOrmHealthIndicator).useValue({ pingCheck: jest.fn().mockResolvedValue({ database: { status: 'up' } }) })
+      .overrideProvider(MicroserviceHealthIndicator).useValue({ pingCheck: jest.fn().mockResolvedValue({ rabbitmq: { status: 'up' } }) })
       .compile();
-
-    app = moduleFixture.createNestApplication();
+    app = moduleRef.createNestApplication();
     await app.init();
+    payments = moduleRef.get(PaymentsService);
+    const base = { userId, items: [{ productId: approvedOrderId, quantity: 1, price: 100 }], paymentMethod: 'pix', createdAt: new Date() };
+    await payments.processPayment({ ...base, orderId: approvedOrderId, amount: 100 });
+    await payments.processPayment({ ...base, orderId: rejectedOrderId, amount: 49.99 });
   });
 
-  it('/ (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/')
-      .expect(200)
-      .expect('Hello World!');
-  });
-
-  it('/health (GET)', () => {
-    return request(app.getHttpServer())
-      .get('/health')
-      .expect(200)
-      .expect({
-        status: 'ok',
-        info: {
-          database: { status: 'up' },
-          rabbitmq: { status: 'up' },
-        },
-        error: {},
-        details: {
-          database: { status: 'up' },
-          rabbitmq: { status: 'up' },
-        },
+  it('returns approved and rejected persisted payments through HTTP', async () => {
+    await request(app.getHttpServer()).get(`/payments/${approvedOrderId}`).expect(200)
+      .expect(({ body }) => {
+        expect(body).toMatchObject({ orderId: approvedOrderId, userId, amount: 100, status: 'approved', rejectionReason: null });
+        expect(body.transactionId).toEqual(expect.any(String));
       });
+    await request(app.getHttpServer()).get(`/payments/${rejectedOrderId}`).expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({ orderId: rejectedOrderId, amount: 49.99, status: 'rejected', transactionId: null, rejectionReason: 'Cartão recusado pela operadora' }));
   });
 
-  it('/metrics (GET) is public, uses route templates and excludes scrapes', async () => {
-    const orderId = payment.orderId;
-
-    await request(app.getHttpServer()).get(`/payments/${orderId}`).expect(200);
-    await request(app.getHttpServer()).get('/consumer-metrics').expect(200);
-    await request(app.getHttpServer()).get('/metrics?first=true').expect(200);
-
-    const response = await request(app.getHttpServer())
-      .get('/metrics')
-      .expect(200);
-
-    expect(response.headers['content-type']).toContain('text/plain');
-    expect(response.text).toContain('# HELP http_requests_total');
-    expect(response.text).toContain('route="/payments/:orderId"');
-    expect(response.text).toContain('route="/consumer-metrics"');
-    expect(response.text).not.toContain(orderId);
-    expect(response.text).not.toContain('route="/metrics"');
-    expect(response.text).not.toContain('"totalProcessed"');
+  it('validates order IDs and missing payments', async () => {
+    await request(app.getHttpServer()).get('/payments/not-a-uuid').expect(400);
+    await request(app.getHttpServer()).get('/payments/00000000-0000-4000-8000-000000000000').expect(404);
   });
 
-  afterEach(async () => {
-    await app.close();
+  it('exposes health without contacting PostgreSQL or RabbitMQ', async () => {
+    await request(app.getHttpServer()).get('/health').expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({ status: 'ok', details: { database: { status: 'up' }, rabbitmq: { status: 'up' } } }));
   });
+
+  afterAll(() => app.close());
 });

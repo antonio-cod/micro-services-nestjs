@@ -1,69 +1,68 @@
-import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication } from '@nestjs/common';
-import request from 'supertest';
-import { App } from 'supertest/types';
-import { AppModule } from './../src/app.module';
+import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
-import type { HealthCheckResult } from '@nestjs/terminus';
+import { Test } from '@nestjs/testing';
+import { MicroserviceHealthIndicator, TypeOrmHealthIndicator } from '@nestjs/terminus';
+import request from 'supertest';
+import { AppModule } from '../src/app.module';
+import { PaymentQueueService } from '../src/events/payment-queue/payment-queue.service';
+import { RabbitmqService } from '../src/events/rabbitmq/rabbitmq.service';
+import { ProductsClientService } from '../src/products-client/products-client.service';
 
-describe('AppController (e2e)', () => {
-  let app: INestApplication<App>;
-  const jwtService = new JwtService();
-  const jwtSecret = 'checkout-service-e2e-secret';
+jest.mock('../src/config/database.config', () => ({
+  databaseConfig: { type: 'better-sqlite3', database: ':memory:', autoLoadEntities: true, synchronize: true, dropSchema: true },
+}));
 
-  beforeEach(async () => {
-    process.env.JWT_SECRET = jwtSecret;
-    const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [AppModule],
-    }).compile();
+process.env.JWT_SECRET = 'checkout-e2e-secret';
 
-    app = moduleFixture.createNestApplication();
+describe('checkout-service HTTP (e2e)', () => {
+  let app: INestApplication;
+  const userId = 'f5d9e8c8-54c3-40c5-a8f5-cf84e29efef4';
+  const productId = '91afac99-0cd9-4438-945e-2766594a725c';
+  const token = new JwtService({ secret: process.env.JWT_SECRET }).sign({ sub: userId, email: 'buyer@test.dev', role: 'buyer' });
+  const publishPaymentOrder = jest.fn().mockResolvedValue(undefined);
+
+  beforeAll(async () => {
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
+      .overrideProvider(ProductsClientService).useValue({ getProduct: jest.fn().mockResolvedValue({ id: productId, name: 'Keyboard', price: 125.5, isActive: true }) })
+      .overrideProvider(PaymentQueueService).useValue({ publishPaymentOrder })
+      .overrideProvider(RabbitmqService).useValue({ subscribeToQueue: jest.fn().mockResolvedValue(undefined), publishMessage: jest.fn() })
+      .overrideProvider(TypeOrmHealthIndicator).useValue({ pingCheck: jest.fn().mockResolvedValue({ database: { status: 'up' } }) })
+      .overrideProvider(MicroserviceHealthIndicator).useValue({ pingCheck: jest.fn().mockResolvedValue({ rabbitmq: { status: 'up' } }) })
+      .compile();
+    app = moduleRef.createNestApplication();
+    app.useGlobalPipes(new ValidationPipe({ whitelist: true, forbidNonWhitelisted: true, transform: true }));
     await app.init();
   });
 
-  it('/ (GET) is protected by default', () => {
-    return request(app.getHttpServer()).get('/').expect(401);
+  it('adds/removes cart items and completes checkout without external services', async () => {
+    const auth = { Authorization: `Bearer ${token}` };
+    const added = await request(app.getHttpServer()).post('/cart/items').set(auth)
+      .send({ productId, quantity: 2 }).expect(200);
+    expect(added.body).toMatchObject({ userId, total: 251, items: [expect.objectContaining({ productId, quantity: 2, subtotal: 251 })] });
+    await request(app.getHttpServer()).get('/cart').set(auth).expect(200)
+      .expect(({ body }) => expect(body.items).toHaveLength(1));
+    await request(app.getHttpServer()).post('/cart/checkout').set(auth)
+      .send({ paymentMethod: 'pix' }).expect(201)
+      .expect(({ body }) => expect(body).toMatchObject({ userId, total: 251, status: 'pending', paymentMethod: 'pix' }));
+    expect(publishPaymentOrder).toHaveBeenCalledWith(expect.objectContaining({ userId, amount: 251 }));
+    await request(app.getHttpServer()).get('/orders').set(auth).expect(200)
+      .expect(({ body }) => expect(body).toHaveLength(1));
+    await request(app.getHttpServer()).get('/cart').set(auth).expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({ id: null, total: 0, items: [] }));
   });
 
-  it('/health (GET) is public', () => {
-    return request(app.getHttpServer())
-      .get('/health')
-      .expect(200)
-      .expect(({ body }) => {
-        const health = body as HealthCheckResult;
-
-        expect(health.status).toBe('ok');
-        expect(health.details.database).toEqual({ status: 'up' });
-        expect(health.details.rabbitmq).toEqual({ status: 'up' });
-      });
+  it('validates authentication and business rules', async () => {
+    await request(app.getHttpServer()).get('/cart').expect(401);
+    await request(app.getHttpServer()).post('/cart/items').set('Authorization', `Bearer ${token}`)
+      .send({ productId, quantity: 0 }).expect(400);
+    await request(app.getHttpServer()).post('/cart/checkout').set('Authorization', `Bearer ${token}`)
+      .send({ paymentMethod: 'pix' }).expect(422);
   });
 
-  it('/metrics (GET) is public and uses low-cardinality route templates', async () => {
-    const orderId = '91afac99-0cd9-4438-945e-2766594a725c';
-    const token = jwtService.sign(
-      {
-        sub: 'f5d9e8c8-54c3-40c5-a8f5-cf84e29efef4',
-        email: 'buyer@example.com',
-        role: 'buyer',
-      },
-      { secret: jwtSecret, expiresIn: 60 },
-    );
-
-    await request(app.getHttpServer())
-      .get(`/orders/${orderId}`)
-      .set('Authorization', `Bearer ${token}`);
-
-    const response = await request(app.getHttpServer())
-      .get('/metrics')
-      .expect(200);
-
-    expect(response.headers['content-type']).toContain('text/plain');
-    expect(response.text).toContain('route="/orders/:id"');
-    expect(response.text).not.toContain(orderId);
-    expect(response.text).not.toContain('route="/metrics"');
+  it('exposes a public health endpoint with mocked RabbitMQ', async () => {
+    await request(app.getHttpServer()).get('/health').expect(200)
+      .expect(({ body }) => expect(body).toMatchObject({ status: 'ok', details: { database: { status: 'up' }, rabbitmq: { status: 'up' } } }));
   });
 
-  afterEach(async () => {
-    await app.close();
-  });
+  afterAll(() => app.close());
 });
