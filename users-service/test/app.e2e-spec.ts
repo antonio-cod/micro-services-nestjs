@@ -9,6 +9,7 @@ import { UserRole } from './../src/users/enums/user-role.enum';
 import { UserStatus } from './../src/users/enums/user-status.enum';
 import { compare, getRounds } from 'bcryptjs';
 import { JwtService } from '@nestjs/jwt';
+import { HealthCheckResult } from '@nestjs/terminus';
 
 const jwtSecret = 'users-service-e2e-jwt-secret';
 process.env.JWT_SECRET = jwtSecret;
@@ -726,12 +727,46 @@ describe('AppController (e2e)', () => {
   });
 
   describe('GET /health', () => {
-    it('is public and identifies the users-service', async () => {
-      await request(app.getHttpServer())
+    it('is public and reports the connected PostgreSQL as available', async () => {
+      const response = await request(app.getHttpServer())
         .get('/health')
         .set('Authorization', 'Bearer invalid.token')
-        .expect(200)
-        .expect({ status: 'ok', service: 'users-service' });
+        .expect(200);
+      const health = response.body as HealthCheckResult;
+
+      expect(health.status).toBe('ok');
+      expect(health.details.database).toEqual({ status: 'up' });
+    });
+
+    it('reports a lost connection and recovers without restarting the app', async () => {
+      const dataSource = app.get(DataSource);
+
+      try {
+        await dataSource.destroy();
+
+        const unavailableResponse = await request(app.getHttpServer())
+          .get('/health')
+          .expect(503);
+        const unavailableHealth = unavailableResponse.body as HealthCheckResult;
+
+        expect(unavailableHealth.status).toBe('error');
+        expect(unavailableHealth.details.database).toEqual({ status: 'down' });
+        expect(JSON.stringify(unavailableHealth)).not.toMatch(
+          /password|postgres:\/\/|stack/i,
+        );
+
+        await dataSource.initialize();
+
+        const recoveredResponse = await request(app.getHttpServer())
+          .get('/health')
+          .expect(200);
+        const recoveredHealth = recoveredResponse.body as HealthCheckResult;
+
+        expect(recoveredHealth.status).toBe('ok');
+        expect(recoveredHealth.details.database).toEqual({ status: 'up' });
+      } finally {
+        if (!dataSource.isInitialized) await dataSource.initialize();
+      }
     });
   });
 

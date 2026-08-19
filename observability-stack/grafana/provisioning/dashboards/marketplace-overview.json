@@ -179,6 +179,68 @@
       "targets": [{ "editorMode": "code", "expr": "sum by (reason) (increase(payments_rejected_total{job=\"payments-service\"}[$__range]))", "instant": true, "legendFormat": "{{reason}}", "refId": "A" }],
       "title": "Rejeições por motivo",
       "type": "barchart"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "description": "Exibe somente os alertas do marketplace que estão ativos neste momento.",
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "Severidade" },
+            "properties": [
+              {
+                "id": "mappings",
+                "value": [
+                  {
+                    "options": {
+                      "critical": { "color": "red", "text": "critical" },
+                      "info": { "color": "blue", "text": "info" },
+                      "warning": { "color": "yellow", "text": "warning" }
+                    },
+                    "type": "value"
+                  }
+                ]
+              },
+              { "id": "custom.cellOptions", "value": { "mode": "basic", "type": "color-background" } }
+            ]
+          }
+        ]
+      },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 46 },
+      "id": 17,
+      "options": {
+        "cellHeight": "sm",
+        "footer": { "countRows": false, "fields": "", "reducer": ["sum"], "show": false },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "ALERTS{alertstate=\"firing\",alertname=~\"ServiceDown|HighErrorRate|HighLatencyP95|HighMemoryUsage|NoPaymentsProcessed|HighPaymentRejectionRate\"}",
+          "format": "table",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Alertas ativos",
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "Value": true, "__name__": true },
+            "indexByName": { "alertname": 0, "severity": 1, "job": 2, "service": 3, "alertstate": 4 },
+            "renameByName": {
+              "alertname": "Alerta",
+              "alertstate": "Estado",
+              "job": "Job",
+              "service": "Serviço",
+              "severity": "Severidade"
+            }
+          }
+        }
+      ],
+      "type": "table"
     }
   ],
   "refresh": "15s",

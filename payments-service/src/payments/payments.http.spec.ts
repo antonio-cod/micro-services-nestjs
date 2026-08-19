@@ -2,7 +2,6 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { App } from 'supertest/types';
-import { HealthController } from '../health/health.controller';
 import { PaymentsController } from './payments.controller';
 import { PaymentsService } from './payments.service';
 
@@ -14,7 +13,7 @@ describe('Payments HTTP', () => {
   beforeEach(async () => {
     paymentsService = { findByOrderId: jest.fn() };
     const module = await Test.createTestingModule({
-      controllers: [PaymentsController, HealthController],
+      controllers: [PaymentsController],
       providers: [{ provide: PaymentsService, useValue: paymentsService }],
     }).compile();
     app = module.createNestApplication();
@@ -41,10 +40,4 @@ describe('Payments HTTP', () => {
 
   it('rejects an invalid order id', () =>
     request(app.getHttpServer()).get('/payments/not-a-uuid').expect(400));
-
-  it('exposes the general health check', () =>
-    request(app.getHttpServer())
-      .get('/health')
-      .expect(200)
-      .expect({ status: 'healthy' }));
 });

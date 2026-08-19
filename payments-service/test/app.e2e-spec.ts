@@ -4,12 +4,17 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppController } from './../src/app.controller';
 import { AppService } from './../src/app.service';
-import { HealthController } from './../src/health/health.controller';
 import { PaymentsController } from './../src/payments/payments.controller';
 import { PaymentsService } from './../src/payments/payments.service';
 import { MetricsModule } from './../src/metrics/metrics.module';
 import { ConsumerMetricsController } from './../src/events/metrics/consumer-metrics.controller';
 import { PaymentConsumerService } from './../src/events/payment-consumer/payment-consumer.service';
+import { ConfigModule } from '@nestjs/config';
+import { HealthModule } from './../src/health/health.module';
+import {
+  MicroserviceHealthIndicator,
+  TypeOrmHealthIndicator,
+} from '@nestjs/terminus';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -27,13 +32,26 @@ describe('AppController (e2e)', () => {
     lastProcessedAt: new Date(),
     startedAt: new Date(),
   };
+  const databasePing = jest
+    .fn()
+    .mockResolvedValue({ database: { status: 'up' } });
+  const rabbitmqPing = jest
+    .fn()
+    .mockResolvedValue({ rabbitmq: { status: 'up' } });
 
   beforeEach(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
-      imports: [MetricsModule],
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+          load: [() => ({ RABBITMQ_URL: 'amqp://rabbitmq:5672' })],
+        }),
+        MetricsModule,
+        HealthModule,
+      ],
       controllers: [
         AppController,
-        HealthController,
         PaymentsController,
         ConsumerMetricsController,
       ],
@@ -51,7 +69,12 @@ describe('AppController (e2e)', () => {
           },
         },
       ],
-    }).compile();
+    })
+      .overrideProvider(TypeOrmHealthIndicator)
+      .useValue({ pingCheck: databasePing })
+      .overrideProvider(MicroserviceHealthIndicator)
+      .useValue({ pingCheck: rabbitmqPing })
+      .compile();
 
     app = moduleFixture.createNestApplication();
     await app.init();
@@ -68,7 +91,18 @@ describe('AppController (e2e)', () => {
     return request(app.getHttpServer())
       .get('/health')
       .expect(200)
-      .expect({ status: 'healthy' });
+      .expect({
+        status: 'ok',
+        info: {
+          database: { status: 'up' },
+          rabbitmq: { status: 'up' },
+        },
+        error: {},
+        details: {
+          database: { status: 'up' },
+          rabbitmq: { status: 'up' },
+        },
+      });
   });
 
   it('/metrics (GET) is public, uses route templates and excludes scrapes', async () => {

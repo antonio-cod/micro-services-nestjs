@@ -4,6 +4,7 @@ import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from './../src/app.module';
 import { JwtService } from '@nestjs/jwt';
+import type { HealthCheckResult } from '@nestjs/terminus';
 
 describe('AppController (e2e)', () => {
   let app: INestApplication<App>;
@@ -25,10 +26,16 @@ describe('AppController (e2e)', () => {
   });
 
   it('/health (GET) is public', () => {
-    return request(app.getHttpServer()).get('/health').expect(200).expect({
-      status: 'ok',
-      service: 'checkout-service',
-    });
+    return request(app.getHttpServer())
+      .get('/health')
+      .expect(200)
+      .expect(({ body }) => {
+        const health = body as HealthCheckResult;
+
+        expect(health.status).toBe('ok');
+        expect(health.details.database).toEqual({ status: 'up' });
+        expect(health.details.rabbitmq).toEqual({ status: 'up' });
+      });
   });
 
   it('/metrics (GET) is public and uses low-cardinality route templates', async () => {

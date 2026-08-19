@@ -17,7 +17,14 @@ describe('Health endpoint', () => {
 
   beforeAll(async () => {
     const moduleFixture = await Test.createTestingModule({
-      imports: [ConfigModule.forRoot({ isGlobal: true }), HealthModule],
+      imports: [
+        ConfigModule.forRoot({
+          isGlobal: true,
+          ignoreEnvFile: true,
+          load: [() => ({ RABBITMQ_URL: 'amqp://rabbitmq:5672' })],
+        }),
+        HealthModule,
+      ],
     })
       .overrideProvider(TypeOrmHealthIndicator)
       .useValue({ pingCheck: databasePing })

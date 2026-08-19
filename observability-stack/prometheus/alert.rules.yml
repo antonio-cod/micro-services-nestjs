@@ -1,0 +1,67 @@
+groups:
+  - name: marketplace-ms
+    rules:
+      - alert: ServiceDown
+        expr: up{job=~"api-gateway|users-service|products-service|checkout-service|payments-service"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: "Serviço {{ $labels.job }} indisponível"
+          description: "O target {{ $labels.job }} não responde ao scrape há pelo menos 30 segundos."
+
+      - alert: HighErrorRate
+        expr: |
+          100 * sum by (job) (rate(http_requests_total{job=~"api-gateway|users-service|products-service|checkout-service|payments-service",status_code=~"5.."}[5m]))
+          / clamp_min(sum by (job) (rate(http_requests_total{job=~"api-gateway|users-service|products-service|checkout-service|payments-service"}[5m])), 1e-9) > 10
+          and on (job) sum by (job) (rate(http_requests_total{job=~"api-gateway|users-service|products-service|checkout-service|payments-service"}[5m])) > 0
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Taxa de erro alta em {{ $labels.job }}"
+          description: "Mais de 10% das respostas foram 5xx na janela de 5 minutos."
+
+      - alert: HighLatencyP95
+        expr: |
+          histogram_quantile(0.95,
+            sum by (job, le) (rate(http_request_duration_seconds_bucket{job=~"api-gateway|users-service|products-service|checkout-service|payments-service"}[5m]))
+          ) > 2
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Latência P95 alta em {{ $labels.job }}"
+          description: "A latência HTTP P95 permaneceu acima de 2 segundos."
+
+      - alert: HighMemoryUsage
+        expr: max by (job) (process_resident_memory_bytes{job=~"api-gateway|users-service|products-service|checkout-service|payments-service"}) > 512 * 1024 * 1024
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Uso de memória alto em {{ $labels.job }}"
+          description: "A memória RSS do processo permaneceu acima de 512 MiB."
+
+      - alert: NoPaymentsProcessed
+        expr: (sum(increase(payments_processed_total{job="payments-service"}[5m])) or vector(0)) == 0
+        for: 5m
+        labels:
+          severity: info
+          service: payments-service
+        annotations:
+          summary: "Nenhum pagamento processado"
+          description: "Nenhum pagamento foi processado nos últimos 5 minutos por pelo menos 5 minutos."
+
+      - alert: HighPaymentRejectionRate
+        expr: |
+          100 * sum(increase(payments_rejected_total{job="payments-service"}[5m]))
+          / clamp_min(sum(increase(payments_processed_total{job="payments-service"}[5m])), 1) > 50
+          and sum(increase(payments_processed_total{job="payments-service"}[5m])) > 0
+        for: 2m
+        labels:
+          severity: warning
+          service: payments-service
+        annotations:
+          summary: "Taxa de rejeição de pagamentos alta"
+          description: "Mais de 50% dos pagamentos processados foram rejeitados na janela de 5 minutos."

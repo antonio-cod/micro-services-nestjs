@@ -38,10 +38,7 @@ export class RabbitmqService implements OnModuleInit, OnModuleDestroy {
 
   private async connect() {
     try {
-      const rabbitmqUrl = this.configService.get<string>(
-        'RABBITMQ_URL',
-        'amqp://admin:admin@localhost:5672',
-      );
+      const rabbitmqUrl = this.configService.getOrThrow<string>('RABBITMQ_URL');
 
       this.connection = await amqp.connect(rabbitmqUrl);
       this.channel = await this.connection.createChannel();
