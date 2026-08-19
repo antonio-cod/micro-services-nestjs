@@ -293,3 +293,19 @@ O cenário cross-service do gateway é intencionalmente separado da suíte E2E p
 - O Grafana é provisionado a partir de `observability-stack/grafana/provisioning`.
 
 Detalhes adicionais da stack estão em [observability-stack/README.md](observability-stack/README.md).
+
+## Diagrama completo da arquitetura
+
+O desenho abaixo é a exportação visual do arquivo [marketplace-ms.excalidraw](docs/architecture/marketplace-ms.excalidraw), preservando cores, componentes, conexões e legendas do diagrama da arquitetura.
+
+<p align="center">
+  <a href="docs/architecture/marketplace-ms.excalidraw" title="Abrir o arquivo editável do Excalidraw">
+    <img
+      src="docs/architecture/marketplace-ms.svg"
+      alt="Diagrama completo da arquitetura do Marketplace MS"
+      width="100%"
+    />
+  </a>
+</p>
+
+> Para editar o desenho, baixe o arquivo `.excalidraw` pelo link acima e importe-o em [excalidraw.com](https://excalidraw.com/).
